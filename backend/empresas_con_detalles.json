@@ -1,0 +1,72 @@
+[
+  {
+    "id": 6,
+    "nombre": "CENTRO VETERINARIO ESPECIALIZADO BOGOTÁ",
+    "nit": "850567890",
+    "ciudad": "bogota",
+    "estado": "Activa",
+    "tamaño": "Grande",
+    "contacto": {
+      "telefono": null,
+      "website": "https://fonts.gstatic.com/",
+      "direccion": "Cra 15 #43-69</span></span></div><div cla"
+    },
+    "actualizado": "2026-05-09T17:14:14.718742"
+  },
+  {
+    "id": 3,
+    "nombre": "CLÍNICA VETERINARIA MONTE VERDE S.A.",
+    "nit": "900234567",
+    "ciudad": "medellin",
+    "estado": "Activa",
+    "tamaño": "Mediana",
+    "contacto": {
+      "telefono": "+57 301 5052787",
+      "website": "https://jahpet.co",
+      "direccion": "Centro Historico, Cartagena"
+    },
+    "actualizado": "2026-05-09T17:18:56.527694"
+  },
+  {
+    "id": 1,
+    "nombre": "JAH PET CLINICA VETERINARIA S.A.S.",
+    "nit": "901531076",
+    "ciudad": "cartagena",
+    "estado": "Activa",
+    "tamaño": "Pequeña",
+    "contacto": {
+      "telefono": "+57 1 2345678",
+      "website": "https://centrovetbogota.com",
+      "direccion": "Carrera 5 #10-20 Chapinero, Bogota"
+    },
+    "actualizado": "2026-05-09T17:03:29.412345"
+  },
+  {
+    "id": 5,
+    "nombre": "VET CLINIC BARRANQUILLA DOGS & CATS",
+    "nit": "800456789",
+    "ciudad": "barranquilla",
+    "estado": "Activa",
+    "tamaño": "Pequeña",
+    "contacto": {
+      "telefono": "+57 1 5678901",
+      "website": "https://paraisovet.co",
+      "direccion": "Cra 7 #125-50 Usaquen, Bogota"
+    },
+    "actualizado": "2026-05-09T17:03:29.412345"
+  },
+  {
+    "id": 2,
+    "nombre": "VETERINARIA EL PARAÍSO LIMITADA",
+    "nit": "800123456",
+    "ciudad": "bogota",
+    "estado": "Activa",
+    "tamaño": "Mediana",
+    "contacto": {
+      "telefono": "+57 4 3456789",
+      "website": "https://clinicamonteverde.co",
+      "direccion": "Calle 50 #45-30 Laureles, Medellin"
+    },
+    "actualizado": "2026-05-09T17:03:29.412345"
+  }
+]

@@ -1,0 +1,43 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Build outputs
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack
+.nitro
+
+# Development
+.git
+.gitignore
+.prettierignore
+.prettierrc
+.env.local
+.env.*.local
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage
+.nyc_output
+
+# Wrangler
+.wrangler
+
+# Documentation
+README.md
+CHANGELOG.md

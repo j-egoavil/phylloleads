@@ -1,0 +1,10 @@
+vite+react 18
+react router
+Typescript
+Zustand
+Tanstack
+SOCKET.IO
+Tailwind
+LUCIDER REACT
+RECHARTS
+SONNER

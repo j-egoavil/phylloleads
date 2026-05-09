@@ -1,0 +1,28 @@
+# =============================================================================
+# Dockerfile para DESARROLLO
+# Permite hot-reloading con Vite
+# =============================================================================
+FROM oven/bun:latest
+
+WORKDIR /app
+
+# Copiar package.json y bun.lock
+COPY package.json bun.lock ./
+
+# Instalar dependencias
+RUN bun install --frozen-lockfile
+
+# Copiar código fuente
+COPY . .
+
+# Exponer puerto (Vite en desarrollo)
+EXPOSE 5173
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl --silent --fail http://localhost:5173 || exit 1
+
+# Iniciar servidor de desarrollo
+# Usar --host para que sea accesible desde fuera del contenedor
+CMD ["bun", "run", "dev", "--host", "0.0.0.0"]
+
