@@ -7,6 +7,7 @@ import sqlite3
 import logging
 import time
 import re
+import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from selenium import webdriver
@@ -18,6 +19,14 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from bs4 import BeautifulSoup
 import requests
 
+# Intentar importar psycopg2 para PostgreSQL
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except Exception:
+    psycopg2 = None
+    RealDictCursor = None
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -28,8 +37,17 @@ logger = logging.getLogger(__name__)
 class AutomaticDataScraper:
     """Scraper automático que busca datos en múltiples fuentes"""
     
-    def __init__(self, db_path: str = "appdb.sqlite"):
+    def __init__(self, db_path: str = "appdb.sqlite", db_type: str = "sqlite",
+                 db_host: str = "localhost", db_port: int = 5432,
+                 db_name: str = "appdb", db_user: str = "postgres", 
+                 db_password: str = "postgres"):
         self.db_path = db_path
+        self.db_type = db_type
+        self.db_host = db_host
+        self.db_port = db_port
+        self.db_name = db_name
+        self.db_user = db_user
+        self.db_password = db_password
         self.conn = None
         self.driver = None
         self.session = requests.Session()
@@ -82,9 +100,26 @@ class AutomaticDataScraper:
     
     def connect_db(self) -> bool:
         try:
-            self.conn = sqlite3.connect(self.db_path)
+            # Intentar PostgreSQL si psycopg2 está disponible
+            if psycopg2 is not None and self.db_type == "postgres":
+                try:
+                    self.conn = psycopg2.connect(
+                        host=self.db_host,
+                        port=self.db_port,
+                        database=self.db_name,
+                        user=self.db_user,
+                        password=self.db_password
+                    )
+                    logger.info("Conectado a PostgreSQL")
+                    return True
+                except Exception as e:
+                    logger.warning(f"No se pudo conectar a PostgreSQL ({e}), usando SQLite...")
+            
+            # Fallback a SQLite
+            db_path = os.getenv("APP_DB_PATH", self.db_path)
+            self.conn = sqlite3.connect(db_path)
             self.conn.row_factory = sqlite3.Row
-            logger.info("Conectado a BD")
+            logger.info("Conectado a SQLite")
             return True
         except Exception as e:
             logger.error(f"Error conectando a BD: {e}")
@@ -394,17 +429,35 @@ class AutomaticDataScraper:
         """Obtiene empresas sin detalles"""
         try:
             cursor = self.conn.cursor()
-            cursor.execute("""
+            
+            # Query para PostgreSQL y SQLite es similar
+            query = """
+                SELECT c.id, c.name, c.city, c.nit
+                FROM companies c
+                LEFT JOIN company_details cd ON c.id = cd.company_id
+                WHERE c.is_active = true
+                AND (cd.id IS NULL 
+                     OR cd.phone = 'N/A' 
+                     OR cd.phone IS NULL)
+                ORDER BY c.name
+                LIMIT %s
+            """ if isinstance(self.conn, type(None)) or (hasattr(self.conn, 'driver_version')) else """
                 SELECT c.id, c.name, c.city, c.nit
                 FROM companies c
                 LEFT JOIN company_details cd ON c.id = cd.company_id
                 WHERE c.is_active = 1
                 AND (cd.id IS NULL 
                      OR cd.phone = 'N/A' 
-                     OR (cd.phone IS NULL))
+                     OR cd.phone IS NULL)
                 ORDER BY c.name
                 LIMIT ?
-            """, (limit,))
+            """
+            
+            # Usar placeholder correcto según la BD
+            if psycopg2 and isinstance(self.conn, psycopg2.extensions.connection):
+                cursor.execute(query, (limit,))
+            else:
+                cursor.execute(query.replace('%s', '?'), (limit,))
             
             results = cursor.fetchall()
             logger.info(f"Encontradas {len(results)} empresas para procesar")
@@ -415,7 +468,7 @@ class AutomaticDataScraper:
             return []
     
     def save_details(self, company_id: int, details: Dict[str, Any]) -> bool:
-        """Guarda detalles en BD"""
+        """Guarda detalles en BD (PostgreSQL o SQLite)"""
         try:
             cursor = self.conn.cursor()
             
@@ -423,17 +476,39 @@ class AutomaticDataScraper:
                 logger.warning("   No hay datos para guardar")
                 return False
             
-            cursor.execute("""
-                INSERT OR REPLACE INTO company_details 
-                (company_id, phone, website, address, scraped_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                company_id,
-                details.get('phone') or 'N/A',
-                details.get('website') or 'N/A',
-                details.get('address') or 'N/A',
-                datetime.now().isoformat()
-            ))
+            # Usar INSERT ON CONFLICT para PostgreSQL, INSERT OR REPLACE para SQLite
+            if psycopg2 and isinstance(self.conn, psycopg2.extensions.connection):
+                # PostgreSQL
+                cursor.execute("""
+                    INSERT INTO company_details 
+                    (company_id, phone, website, address, scraped_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (company_id) 
+                    DO UPDATE SET 
+                        phone = EXCLUDED.phone,
+                        website = EXCLUDED.website,
+                        address = EXCLUDED.address,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (
+                    company_id,
+                    details.get('phone') or 'N/A',
+                    details.get('website') or 'N/A',
+                    details.get('address') or 'N/A',
+                    datetime.now().isoformat()
+                ))
+            else:
+                # SQLite
+                cursor.execute("""
+                    INSERT OR REPLACE INTO company_details 
+                    (company_id, phone, website, address, scraped_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    company_id,
+                    details.get('phone') or 'N/A',
+                    details.get('website') or 'N/A',
+                    details.get('address') or 'N/A',
+                    datetime.now().isoformat()
+                ))
             
             self.conn.commit()
             logger.info("   ✓ Datos guardados en BD")
@@ -514,7 +589,24 @@ def main():
     print("Búsqueda multi-fuente: Google Maps + DuckDuckGo + Páginas Amarillas")
     print("="*80)
     
-    scraper = AutomaticDataScraper()
+    # Configurar BD desde variables de entorno
+    db_type = "postgres" if os.getenv("DB_HOST") else "sqlite"
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = int(os.getenv("DB_PORT", "5432"))
+    db_name = os.getenv("DB_NAME", "appdb")
+    db_user = os.getenv("DB_USER", "postgres")
+    db_password = os.getenv("DB_PASSWORD", "postgres")
+    db_path = os.getenv("APP_DB_PATH", "appdb.sqlite")
+    
+    scraper = AutomaticDataScraper(
+        db_path=db_path,
+        db_type=db_type,
+        db_host=db_host,
+        db_port=db_port,
+        db_name=db_name,
+        db_user=db_user,
+        db_password=db_password
+    )
     result = scraper.process_companies(limit=10)
     
     print("\n" + "="*80)

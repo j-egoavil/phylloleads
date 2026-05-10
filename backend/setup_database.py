@@ -255,14 +255,24 @@ def main():
     print("🗄️  SETUP DE BASE DE DATOS")
     print("="*80)
     
-    # Usar SQLite por defecto (más simple, sin instalación)
-    print("\n1️⃣  Conectando a SQLite...")
-    db = DatabaseSetup(db_type="sqlite")
-    db.connect_sqlite()
+    # Preferir PostgreSQL, fallback a SQLite
+    use_postgres = os.getenv("DB_HOST") and os.getenv("DB_USER")
+    
+    if use_postgres:
+        print("\n1️⃣  Conectando a PostgreSQL...")
+        db = DatabaseSetup(db_type="postgres")
+        db.connect_postgres()
+    else:
+        print("\n1️⃣  Conectando a SQLite...")
+        db = DatabaseSetup(db_type="sqlite")
+        db.connect_sqlite()
     
     # Crear tablas
     print("\n2️⃣  Creando tablas...")
-    db.create_tables_sqlite()
+    if db.db_type == "postgres":
+        db.create_tables_postgres()
+    else:
+        db.create_tables_sqlite()
     
     # Importar datos
     print("\n3️⃣  Importando datos del test...")

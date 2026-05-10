@@ -600,7 +600,7 @@ if __name__ == "__main__":
     db_user = os.getenv("DB_USER", "postgres")
     db_password = os.getenv("DB_PASSWORD", "postgres")
     
-    # Crear scraper
+    # Crear scraper - intentará PostgreSQL si psycopg2 está disponible
     scraper = EmpresasLaRepublicaScraper(
         db_host=db_host,
         db_port=db_port,
