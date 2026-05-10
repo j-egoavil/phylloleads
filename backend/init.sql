@@ -1,17 +1,44 @@
+-- Schema PostgreSQL para Phylloleads (scrapers + lead scoring)
+
 CREATE TABLE companies (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(255),
-    website VARCHAR(255),
-    email VARCHAR(255),
-    phone VARCHAR(50),
-    city VARCHAR(100),
-    country VARCHAR(100),
+    name VARCHAR(500) NOT NULL,
+    url VARCHAR(1000),
+    nit VARCHAR(100),
+    rues VARCHAR(100),
+    city VARCHAR(200),
+    country VARCHAR(100) DEFAULT 'Colombia',
+    is_active BOOLEAN DEFAULT true,
+    status VARCHAR(50),
+    company_size VARCHAR(50),
+    search_niche VARCHAR(200),
     industry VARCHAR(100),
     employee_count INT,
     annual_revenue NUMERIC(15,2),
+    email VARCHAR(255),
+    website VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scraped_at TIMESTAMP,
+    UNIQUE(url)
+);
+
+-- Tabla de detalles enriquecidos de empresas (Google Maps, Páginas Amarillas, etc.)
+CREATE TABLE company_details (
+    id BIGSERIAL PRIMARY KEY,
+    company_id BIGINT UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+    phone VARCHAR(50),
+    website VARCHAR(500),
+    address TEXT,
+    latitude NUMERIC(10,8),
+    longitude NUMERIC(11,8),
+    google_maps_url VARCHAR(1000),
+    source VARCHAR(100),
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
 CREATE TABLE social_profiles (
     id BIGSERIAL PRIMARY KEY,
     company_id BIGINT REFERENCES companies(id) ON DELETE CASCADE,
@@ -66,5 +93,10 @@ CREATE TABLE contacts (
 );
 CREATE INDEX idx_companies_name ON companies(name);
 CREATE INDEX idx_companies_email ON companies(email);
+CREATE INDEX idx_companies_city ON companies(city);
+CREATE INDEX idx_companies_niche ON companies(search_niche);
+CREATE INDEX idx_companies_active ON companies(is_active);
+CREATE INDEX idx_company_details_phone ON company_details(phone);
+CREATE INDEX idx_company_details_website ON company_details(website);
 CREATE INDEX idx_social_username ON social_profiles(username);
 CREATE INDEX idx_lead_scores_priority ON lead_scores(priority);

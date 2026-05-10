@@ -1,0 +1,58 @@
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+appdb.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Generated files
+dist/
+build/
+*.egg-info/
+
+# Node (si usas frontend)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Test results
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temp files
+*.tmp
+*.temp
+/temp/

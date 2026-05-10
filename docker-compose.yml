@@ -55,7 +55,7 @@ services:
   #     - phylloleads_network
 
   # =========================================================================
-  # BACKEND - FastAPI
+  # BACKEND - FastAPI + Scrapers
   # =========================================================================
   backend:
     build:
@@ -67,23 +67,21 @@ services:
     environment:
       DB_HOST: database
       DB_PORT: 5432
-      DB_NAME: phylloleads
-      DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_NAME: ${DB_NAME:-appdb}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      APP_DB_PATH: /app/appdb.sqlite
+      PYTHONUNBUFFERED: 1
     depends_on:
       database:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - phylloleads_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     volumes:
       - ./backend:/app
+      - ./backend/test_results:/app/test_results
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
   # =========================================================================
   # DATABASE - PostgreSQL
@@ -93,17 +91,18 @@ services:
     container_name: phylloleads_database
     restart: unless-stopped
     environment:
-      POSTGRES_DB: phylloleads
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME:-appdb}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     networks:
       - phylloleads_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
