@@ -35,7 +35,7 @@ class EmpresasLaRepublicaScraper:
     """
     
     BASE_URL = "https://empresas.larepublica.co"
-    SEARCH_URL = f"{BASE_URL}/search"
+    SEARCH_URL = f"{BASE_URL}/buscar"
     
     def __init__(
         self,

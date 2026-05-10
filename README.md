@@ -1,400 +1,211 @@
-# Scraper La República - Documentación
+# PHYLLOLEADS - Scraper y Enriquecimiento de Datos de Empresas
 
-## Descripción
-Scraper automatizado para extraer información de empresas desde **empresas.larepublica.co**
+Aplicación completa para scrapear, organizar y enriquecer datos de empresas desde múltiples fuentes (La República, Google Maps, DuckDuckGo).
 
-### Datos extraídos
-- **Nombre** de la empresa
-- **Enlace** a la empresa en el sitio
-- **RUES** (número de registro)
-- **Ciudad** 
-- **Estado** (Activa/Inactiva)
-- **Tamaño** de la empresa (Micro, Pequeña, Mediana, Grande)
+## 📁 Estructura del Proyecto
 
----
+```
+phylloleads/
+├── backend/                    # API FastAPI + Servicios de scraping
+│   ├── app/                   # Código modular (config, modelos, rutas)
+│   ├── services/              # Servicios de scraping reutilizables
+│   ├── scripts/               # Scripts de automatización (maestro, setup, etc)
+│   ├── db/                    # Esquemas SQL y datos
+│   ├── tests/                 # Tests unitarios
+│   ├── main.py               # Entry point API (actual)
+│   ├── main_refactored.py    # Versión modular (WIP)
+│   └── requirements.txt
+│
+├── frontend/                  # React + TanStack Router
+├── docs/                      # Documentación centralizada
+├── docker-compose.yml         # Orquestación de servicios
+└── README.md                  # Este archivo
+```
 
-## Instalación Local
+## 🚀 Inicio Rápido
 
-### Requisitos
-- Python 3.11+
-- PostgreSQL 16
-- Chrome/Chromium (para Selenium)
-- Docker (opcional)
-
-### Instalación
+### 1. Configuración Inicial
 
 ```bash
-# 1. Clonar o descargar el proyecto
-cd phylloleads/backend
+# Clonar proyecto
+git clone <repo>
+cd phylloleads
+cp .env.example .env
 
-# 2. Crear ambiente virtual
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-# Linux/Mac
-source venv/bin/activate
-
-# 3. Instalar dependencias
-pip install -r requirements.txt
-
-# 4. Configurar variables de entorno
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_NAME=appdb
-export DB_USER=postgres
-export DB_PASSWORD=postgres
+# Crear entorno virtual
+python -m venv .venv
+.venv\Scripts\activate  # Windows
 ```
 
-### Uso Directo del Script
+### 2. Instalar Dependencias
 
 ```bash
-# Búsqueda básica (1 página)
-python scraper_la_republica.py "veterinarias"
-
-# Búsqueda múltiples páginas
-python scraper_la_republica.py "restaurantes" 5
+pip install -r backend/requirements.txt
 ```
 
----
-
-## API REST
-
-### Iniciar servidor
+### 3. Ejecutar Scraper Principal
 
 ```bash
-# Desarrollo
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
-# Producción
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+python backend/scripts/run_scraper_maestro.py
 ```
 
-La API estará disponible en: `http://localhost:8000`
+Esto ejecuta automáticamente:
+1. Extrae empresas de La República
+2. Enriquece datos con Google Maps
+3. Genera reportes y exporta JSON
 
-Documentación interactiva: `http://localhost:8000/docs`
-
----
-
-## Endpoints
-
-### 1. Health Check
-```http
-GET /health
-```
-
-**Respuesta:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2024-05-09T10:30:00.123456"
-}
-```
-
----
-
-### 2. Búsqueda Sincrónica (Espera resultado)
-```http
-POST /api/search
-Content-Type: application/json
-
-{
-  "niche": "veterinarias",
-  "pages": 2
-}
-```
-
-**Respuesta:**
-```json
-{
-  "success": true,
-  "niche": "veterinarias",
-  "total_companies": 45,
-  "message": "Scrape completado: 45 empresas",
-  "companies": [
-    {
-      "name": "JAH PET CLINICA VETERINARIA S.A.S.",
-      "url": "https://empresas.larepublica.co/colombia/bolivar/cartagena/jah-pet-clinica-veterinaria-s-a-s-901531076",
-      "rues": "901531076",
-      "city": "cartagena",
-      "is_active": true,
-      "status": "Activa",
-      "company_size": "Pequeña",
-      "search_niche": "veterinarias",
-      "scraped_at": "2024-05-09T10:30:00.123456"
-    }
-    // ... más empresas
-  ]
-}
-```
-
----
-
-### 3. Búsqueda Asincrónica (Background)
-```http
-POST /api/search-async
-Content-Type: application/json
-
-{
-  "niche": "restaurantes",
-  "pages": 5
-}
-```
-
-**Respuesta (inmediata):**
-```json
-{
-  "success": true,
-  "message": "Búsqueda de 'restaurantes' iniciada en background",
-  "niche": "restaurantes",
-  "status": "processing"
-}
-```
-⚠️ **Nota:** La búsqueda continúa en background. Use el endpoint `/api/companies/{niche}` para consultar resultados.
-
----
-
-### 4. Obtener Empresas por Nicho
-```http
-GET /api/companies/veterinarias?limit=50
-```
-
-**Respuesta:**
-```json
-{
-  "success": true,
-  "niche": "veterinarias",
-  "total": 45,
-  "companies": [
-    {
-      "id": 1,
-      "name": "JAH PET CLINICA VETERINARIA S.A.S.",
-      "url": "https://empresas.larepublica.co/...",
-      "rues": "901531076",
-      "city": "cartagena",
-      "is_active": true,
-      "status": "Activa",
-      "company_size": "Pequeña",
-      "search_niche": "veterinarias",
-      "scraped_at": "2024-05-09T10:30:00.123456"
-    }
-    // ... más empresas
-  ]
-}
-```
-
----
-
-### 5. Estadísticas
-```http
-GET /api/stats
-```
-
-**Respuesta:**
-```json
-{
-  "total_companies": 234,
-  "companies_by_niche": [
-    {
-      "niche": "veterinarias",
-      "count": 45
-    },
-    {
-      "niche": "restaurantes",
-      "count": 89
-    }
-  ],
-  "active_companies": 210,
-  "inactive_companies": 24
-}
-```
-
----
-
-## Docker Compose
+### 4. Iniciar API
 
 ```bash
-# Desde la raíz del proyecto
+cd backend
+python -m uvicorn main:app --reload
+```
+
+Accede a `http://localhost:8000/docs` para explorar la API.
+
+## 📦 Estructura del Backend
+
+### `services/`
+Contiene los scrapers reutilizables:
+- `scraper_la_republica.py` - Extrae empresas de LaRepública.co
+- `scraper_automatico.py` - Enriquecimiento multi-fuente
+- `google_maps_scraper.py` - Búsqueda en Google Maps
+
+### `scripts/`
+Scripts de utilidad y automatización:
+- `run_scraper_maestro.py` - Orquesta todo el flujo (ejecuta 3 pasos)
+- `setup_database.py` - Inicializa base de datos
+- `migrate_sqlite_to_postgres.py` - Migración de datos
+
+### `db/`
+Esquemas y queries:
+- `schema.sql` - Schema principal de BD
+- `results.sql` - Queries útiles
+
+## 🔑 Variables de Entorno
+
+```env
+# Base de Datos
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=appdb
+DB_USER=postgres
+DB_PASSWORD=postgres
+SQLITE_DB=appdb.sqlite  # Fallback
+
+# Scraper
+HEADLESS=True
+TIMEOUT=30
+MAX_RETRIES=3
+
+# API
+DEBUG=False
+PORT=8000
+```
+
+## 🔌 Endpoints Principales
+
+```bash
+# Búsqueda
+POST /api/search                    # Buscar empresas por nicho
+GET  /api/companies/{niche}         # Obtener empresas guardadas
+
+# Datos enriquecidos
+GET  /api/companies-with-details    # Con teléfono, website, dirección
+
+# Estadísticas
+GET  /api/stats                     # Resumen general
+GET  /health                        # Health check
+```
+
+## 🐳 Docker
+
+```bash
+# Build y run
 docker-compose up --build
 
-# La API estará en http://localhost:8000
-# PostgreSQL estará en localhost:5432
+# Servicios disponibles:
+# - API: http://localhost:8000
+# - Frontend: http://localhost:3000
+# - PostgreSQL: localhost:5432
 ```
 
----
+## 📚 Documentación
 
-## Ejemplo de Uso desde Frontend (React/JavaScript)
+- **[SCRAPER.md](docs/SCRAPER.md)** - Detalles de scrapers y opciones
+- **[DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md)** - Guía de Docker
+- **[POSTGRES_SETUP.md](docs/POSTGRES_SETUP.md)** - Configuración PostgreSQL
+- **[GUIA_RAPIDA.md](docs/GUIA_RAPIDA.md)** - Start rápido
 
-```javascript
-// Búsqueda sincrónica
-async function searchCompanies(niche, pages = 1) {
-  try {
-    const response = await fetch('http://localhost:8000/api/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        niche: niche,
-        pages: pages
-      })
-    });
-    
-    const data = await response.json();
-    console.log(`Encontradas ${data.total_companies} empresas`);
-    return data.companies;
-  } catch (error) {
-    console.error('Error en búsqueda:', error);
-  }
-}
+## 🔧 Comandos Útiles
 
-// Búsqueda asincrónica
-async function searchCompaniesAsync(niche, pages = 1) {
-  try {
-    const response = await fetch('http://localhost:8000/api/search-async', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        niche: niche,
-        pages: pages
-      })
-    });
-    
-    const data = await response.json();
-    console.log('Búsqueda iniciada en background');
-    
-    // Poll para obtener resultados
-    let attempts = 0;
-    const maxAttempts = 60; // 5 minutos (5s * 60)
-    
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Esperar 5s
-      
-      const resultsResponse = await fetch(
-        `http://localhost:8000/api/companies/${niche}`
-      );
-      const resultsData = await resultsResponse.json();
-      
-      if (resultsData.total > 0) {
-        console.log(`Búsqueda completada: ${resultsData.total} empresas`);
-        return resultsData.companies;
-      }
-      
-      attempts++;
-    }
-    
-    console.log('Timeout esperando resultados');
-  } catch (error) {
-    console.error('Error en búsqueda async:', error);
-  }
-}
+```bash
+# Ejecutar todo el flujo
+python backend/scripts/run_scraper_maestro.py
 
-// Obtener estadísticas
-async function getStats() {
-  try {
-    const response = await fetch('http://localhost:8000/api/stats');
-    const data = await response.json();
-    console.log('Estadísticas:', data);
-    return data;
-  } catch (error) {
-    console.error('Error obteniendo estadísticas:', error);
-  }
-}
+# Setup inicial BD
+python backend/scripts/setup_database.py
 
-// Uso
-searchCompanies('veterinarias', 2).then(companies => {
-  companies.forEach(company => {
-    console.log(`${company.name} - ${company.city}`);
-  });
-});
+# Actualizar datos
+python backend/scripts/actualizar_datos.py
+
+# Tests
+pytest backend/tests/
+
+# API desarrollo
+cd backend && python -m uvicorn main:app --reload --port 8000
+
+# API producción
+cd backend && python -m uvicorn main:app --workers 4 --port 8000
 ```
 
----
+## 📊 Datos Extraídos
 
-## Estructura de Base de Datos
+- Nombre de empresa
+- Número de registro (RUES)
+- Ciudad
+- Estado (Activa/Inactiva)
+- Tamaño de empresa
+- Teléfono (enriquecimiento)
+- Website (enriquecimiento)
+- Dirección (enriquecimiento)
 
-### Tabla: `companies`
-```sql
-CREATE TABLE companies (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(500) NOT NULL,
-  url VARCHAR(1000),
-  rues VARCHAR(100),
-  city VARCHAR(200),
-  is_active BOOLEAN DEFAULT true,
-  status VARCHAR(50),
-  company_size VARCHAR(50),
-  search_niche VARCHAR(200),
-  scraped_at TIMESTAMP,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(url)
-);
+## 🔄 Flujo de Trabajo
+
+```
+Run Scraper Maestro
+    ↓
+[PASO 1] Extrae La República
+    ↓ (Si no hay resultados, intenta enriquecimiento)
+[PASO 2] Enriquecimiento (Google Maps + DuckDuckGo)
+    ↓
+[PASO 3] Genera reporte y exporta JSON
+    ↓
+✅ Datos listos en API y BD
 ```
 
-### Tabla: `search_logs`
-```sql
-CREATE TABLE search_logs (
-  id SERIAL PRIMARY KEY,
-  niche VARCHAR(200) NOT NULL,
-  total_companies INT,
-  pages_scraped INT,
-  started_at TIMESTAMP,
-  completed_at TIMESTAMP,
-  status VARCHAR(50)
-);
-```
+## ⚙️ Requierimientos
 
----
+- Python 3.11+
+- PostgreSQL 16 (opcional, SQLite por defecto)
+- Firefox o Chrome para Selenium
+- Docker (opcional)
 
-## Notas Importantes
+## 🐛 Solución de Problemas
 
-⚠️ **Respectar el sitio:**
-- El scraper tiene delays entre requests (1-2 segundos)
-- No aumentar la velocidad para evitar bloqueos
-- Usar con responsabilidad
+**PostgreSQL no conecta**: El sistema usa SQLite automáticamente como fallback.
 
-📊 **Performance:**
-- Búsqueda de 1 página: ~30-45 segundos
-- Búsqueda de 5 páginas: ~2-3 minutos
-- Para búsquedas largas, usar `/api/search-async`
+**Firefox no inicia**: Instala Firefox o usa Chrome editando los scripts.
 
-🔄 **Duplicados:**
-- El scraper evita duplicados usando `UNIQUE(url)`
-- Si repites búsqueda, actualiza los datos existentes
+**Puerto 8000 en uso**: `python -m uvicorn main:app --port 8001`
 
----
+## 📝 Notas
 
-## Troubleshooting
+- Documentación antigua fue consolidada en `docs/`
+- Backend tiene estructura modular lista para expansión
+- Frontend está separado para independencia
+- Todo funciona con SQLite, PostgreSQL opcional
 
-### Error: "No se encontraron resultados"
-- El nicho no existe o está mal escrito
-- Probar con términos más comunes
+## 📞 Contacto
 
-### Timeout en búsqueda
-- El servidor puede estar saturado
-- Intentar con menos páginas
-- Usar endpoint asincrónico (`/api/search-async`)
-
-### Error de conexión PostgreSQL
-- Verificar que PostgreSQL esté corriendo
-- Verificar credenciales en variables de entorno
-- Si usa Docker: `docker-compose up -d db`
-
-### Chrome/Chromium no encontrado
-- Instalar Chrome o Chromium
-- En Docker ya está incluido
-
----
-
-## Roadmap
-
-- [ ] Agregar cache de resultados
-- [ ] Información detallada por empresa (al hacer click)
-- [ ] Exportar a CSV/Excel
-- [ ] Filtrado avanzado (ciudad, tamaño, etc)
-- [ ] Webhook para notificar nuevas empresas
-- [ ] Rate limiting y autenticación
-
+Para issues o preguntas, crea un issue en el repositorio.

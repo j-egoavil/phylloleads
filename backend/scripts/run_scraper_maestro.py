@@ -120,7 +120,7 @@ def main():
 
     # PASO 1: Extraer de La República
     if run_command(
-        'scraper_la_republica.py',
+        '../services/scraper_la_republica.py',
         'PASO 1: Extrayendo empresas de La República',
         env=child_env,
         timeout=args.timeout,
@@ -131,7 +131,7 @@ def main():
 
     # PASO 2: Scraper automático
     if run_command(
-        'scraper_automatico.py',
+        '../services/scraper_automatico.py',
         'PASO 2: Enriquecimiento automático (Google Maps + DuckDuckGo + Páginas Amarillas)',
         env=child_env,
         timeout=args.timeout,
@@ -142,7 +142,7 @@ def main():
 
     # PASO 3: Mostrar datos
     if run_command(
-        'ver_empresas_con_detalles.py',
+        'show_results.py',
         'PASO 3: Mostrando datos finales',
         env=child_env,
         timeout=args.timeout,
