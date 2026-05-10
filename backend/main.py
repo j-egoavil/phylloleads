@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -6,8 +6,16 @@ import os
 import logging
 import sqlite3
 import time
-from scraper_la_republica import EmpresasLaRepublicaScraper
-from scraper_automatico import AutomaticDataScraper
+import sys
+from pathlib import Path
+
+# Agregar servicios al path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from services.scraper_la_republica import EmpresasLaRepublicaScraper
+from services.scraper_automatico import AutomaticDataScraper
+from app.routes.scraper import router as scraper_router
+from app.routes.companies import router as companies_router
 from datetime import datetime
 
 # Configurar logging
@@ -16,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 # Crear app FastAPI
 app = FastAPI(
-    title="Scraper La República API",
-    description="API para scrapear empresas de empresas.larepublica.co",
+    title="Phylloleads - Scraper y Lead Scoring",
+    description="API para scrapear empresas, calificar leads y gestionar en tiempo real",
     version="1.0.0"
 )
+
+# Incluir routers
+app.include_router(scraper_router)
+app.include_router(companies_router)
 
 # CORS
 app.add_middleware(
@@ -29,6 +41,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Endpoint de salud
+@app.get("/health")
+async def health_check():
+    """Health check"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/")
+async def root():
+    """Endpoint raíz"""
+    return {
+        "name": "Phylloleads API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "endpoints": {
+            "scraper": "/api/scraper",
+            "companies": "/api/companies"
+        }
+    }
 
 # Modelos Pydantic
 class SearchRequest(BaseModel):
