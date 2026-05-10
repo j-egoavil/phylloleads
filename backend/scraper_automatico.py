@@ -101,8 +101,40 @@ class AutomaticDataScraper:
             except:
                 pass
     
+    def extract_phone_from_text(self, text: str) -> Optional[str]:
+        """Extrae teléfono del texto usando múltiples patrones robustos"""
+        patterns = [
+            r'\+57\s*[1-9]\s*[\d\s\-\(\)]{8,}',  # Números colombianos con +57
+            r'\(?\d{1,3}\)?\s*[\d\s\-\(\)]{8,12}',  # Formato (1) 234-5678
+            r'\d{3}[\s\-]?\d{3,4}[\s\-]?\d{4}',  # XXX-XXXX o XXX XXX XXXX
+            r'\+\d{1,3}\s*\d{8,}',  # Cualquier número con +
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                phone = match.group(0).strip()
+                digits = re.sub(r'\D', '', phone)
+                if len(digits) >= 7:
+                    return phone
+        return None
+    
+    def extract_website_from_text(self, text: str) -> Optional[str]:
+        """Extrae website del texto usando múltiples patrones"""
+        patterns = [
+            r'https?://[^\s\)<>]+',  # URLs completas
+            r'www\.[^\s\)<>]+',  # URLs www
+            r'[a-zA-Z0-9.-]+\.(com|co|net|org|gov|com\.co|edu|io)[^\s\)<>]*',  # Dominios
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                url = match.group(0).strip()
+                if len(url) < 200 and not any(x in url.lower() for x in ['google', 'duckduckgo', 'facebook']):
+                    return url
+        return None
+    
     def search_duckduckgo(self, empresa_nombre: str, ciudad: str) -> Optional[Dict]:
-        """Busca en DuckDuckGo (más datos que Google en algunos casos)"""
+        """Busca en DuckDuckGo con fallback a regex"""
         if not self.driver:
             return None
         
@@ -114,32 +146,73 @@ class AutomaticDataScraper:
             
             self.driver.set_page_load_timeout(15)
             self.driver.get(url)
-            
             time.sleep(3)
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # Buscar en snippets
-            snippets = soup.find_all('span', {'data-result': 'snippet'})
+            page_text = soup.get_text()
             
             results = {'phone': None, 'website': None}
+            snippets = soup.find_all('span', {'data-result': 'snippet'})
             
             for snippet in snippets[:3]:
                 text = snippet.get_text(strip=True)
-                
-                # Buscar teléfono
-                phone_match = re.search(
-                    r'\+57\s*[1-9]\s*[\d\s\-]{8,}|(\d{1}\s*)?(\d{3,4}\s*)?(\d{4,5})',
-                    text
-                )
-                if phone_match and not results['phone']:
-                    results['phone'] = phone_match.group(0).strip()
-                    logger.info(f"      -> Teléfono: {results['phone']}")
+                if not results['phone']:
+                    phone = self.extract_phone_from_text(text)
+                    if phone:
+                        results['phone'] = phone
+                        logger.info(f"      -> Teléfono: {results['phone']}")
+                if not results['website']:
+                    website = self.extract_website_from_text(text)
+                    if website:
+                        results['website'] = website
+                        logger.info(f"      -> Website: {results['website']}")
+            
+            if not results['phone']:
+                phone = self.extract_phone_from_text(page_text)
+                if phone:
+                    results['phone'] = phone
+                    logger.info(f"      -> Teléfono (regex): {results['phone']}")
             
             return results if any(results.values()) else None
         
         except Exception as e:
             logger.warning(f"   Error DuckDuckGo: {str(e)[:50]}")
+            return None
+    
+    
+    def search_google_web(self, empresa_nombre: str, ciudad: str) -> Optional[Dict]:
+        """Búsqueda robusta en Google usando requests (sin Selenium)"""
+        try:
+            logger.info(f"   Buscando en Google Web: {empresa_nombre}")
+            
+            query = f"{empresa_nombre} {ciudad} telefono contacto site:.co"
+            url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+            
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                return None
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            text = soup.get_text()
+            
+            results = {'phone': None, 'website': None}
+            
+            phone = self.extract_phone_from_text(text)
+            if phone:
+                results['phone'] = phone
+                logger.info(f"      -> Teléfono: {phone}")
+            
+            website = self.extract_website_from_text(text)
+            if website:
+                results['website'] = website
+                logger.info(f"      -> Website: {website}")
+            
+            return results if any(results.values()) else None
+        
+        except Exception as e:
+            logger.warning(f"   Error Google Web: {str(e)[:50]}")
             return None
     
     def search_local_directory(self, empresa_nombre: str, ciudad: str) -> Optional[Dict]:
@@ -150,13 +223,11 @@ class AutomaticDataScraper:
         try:
             logger.info(f"   Buscando en directorios: {empresa_nombre}")
             
-            # Intentar acceso a Páginas Amarillas
             search_url = f"https://www.paginasamarillas.com.co/search?q={empresa_nombre}"
             
             self.driver.set_page_load_timeout(15)
             self.driver.get(search_url)
             
-            # Esperar resultados
             try:
                 WebDriverWait(self.driver, 10).until(
                     EC.presence_of_all_elements_located((By.CLASS_NAME, "listing"))
@@ -166,6 +237,7 @@ class AutomaticDataScraper:
             
             time.sleep(2)
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            page_text = soup.get_text()
             
             results = {'phone': None, 'website': None, 'address': None}
             
@@ -176,6 +248,13 @@ class AutomaticDataScraper:
                 if phone:
                     results['phone'] = phone
                     logger.info(f"      -> Teléfono: {phone}")
+            
+            # Si no encontró por selector, buscar en todo el texto
+            if not results['phone']:
+                phone = self.extract_phone_from_text(page_text)
+                if phone:
+                    results['phone'] = phone
+                    logger.info(f"      -> Teléfono (regex): {phone}")
             
             # Buscar dirección
             address_elem = soup.find('span', class_='address')
@@ -192,7 +271,7 @@ class AutomaticDataScraper:
             return None
     
     def search_google_maps(self, empresa_nombre: str, ciudad: str) -> Optional[Dict]:
-        """Busca en Google Maps (ya funciona bien)"""
+        """Busca en Google Maps con fallback robusta a regex"""
         if not self.driver:
             return None
         
@@ -208,30 +287,53 @@ class AutomaticDataScraper:
             time.sleep(4)
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            page_text = soup.get_text()
             
             results = {'phone': None, 'website': None, 'address': None}
             
-            # Buscar teléfono
-            phone_pattern = r'\+57\s*[1-9]\s*[\d\s\-\(\)]{8,}'
-            phones = re.findall(phone_pattern, soup.get_text())
-            if phones:
-                results['phone'] = phones[0].replace(' ', '').strip()
+            # Buscar teléfono: primero por selector, luego fallback a regex
+            phone = None
+            phone_elem = soup.find('a', href=re.compile(r'^tel:'))
+            if phone_elem:
+                phone = phone_elem.get('href', '').replace('tel:', '').strip()
+            
+            if not phone:
+                phone = self.extract_phone_from_text(page_text)
+            
+            if phone:
+                results['phone'] = phone
                 logger.info(f"      -> Teléfono: {results['phone']}")
             
-            # Buscar dirección
+            # Buscar dirección: primero por selector, luego por palabras clave
+            address = None
             address_elem = soup.find('div', {'data-attrid': 'address'})
             if address_elem:
                 address = address_elem.get_text(strip=True)
+            
+            if not address:
+                for line in page_text.split('\n'):
+                    line = line.strip()
+                    if any(word in line.lower() for word in ['calle', 'carrera', 'avenida', 'av.', 'cra.', 'cll.', 'diag']):
+                        if 10 < len(line) < 100:
+                            address = line
+                            break
+            
+            if address:
                 results['address'] = address
                 logger.info(f"      -> Dirección: {address[:40]}")
             
-            # Buscar website
+            # Buscar website: primero por selector, luego fallback a regex
+            website = None
             website_links = soup.find_all('a', {'data-attrid': 'website'})
             if website_links:
                 website = website_links[0].get('href', '')
-                if website:
-                    results['website'] = website
-                    logger.info(f"      -> Website: {website[:40]}")
+            
+            if not website:
+                website = self.extract_website_from_text(page_text)
+            
+            if website:
+                results['website'] = website
+                logger.info(f"      -> Website: {website[:40]}")
             
             return results if any(results.values()) else None
         
@@ -256,6 +358,7 @@ class AutomaticDataScraper:
             # Estrategia: buscar en orden de confiabilidad
             sources = [
                 ('google_maps', self.search_google_maps),
+                ('google_web', self.search_google_web),
                 ('duckduckgo', self.search_duckduckgo),
                 ('paginas_amarillas', self.search_local_directory),
             ]

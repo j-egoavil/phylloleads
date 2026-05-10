@@ -7,11 +7,11 @@
     "estado": "Activa",
     "tamaño": "Grande",
     "contacto": {
-      "telefono": null,
-      "website": "https://fonts.gstatic.com/",
-      "direccion": "Cra 15 #43-69</span></span></div><div cla"
+      "telefono": "(601) 7423686",
+      "website": null,
+      "direccion": null
     },
-    "actualizado": "2026-05-09T17:14:14.718742"
+    "actualizado": "2026-05-10T09:21:02.406490"
   },
   {
     "id": 3,
@@ -21,11 +21,11 @@
     "estado": "Activa",
     "tamaño": "Mediana",
     "contacto": {
-      "telefono": "+57 301 5052787",
-      "website": "https://jahpet.co",
-      "direccion": "Centro Historico, Cartagena"
+      "telefono": "301 5052787",
+      "website": null,
+      "direccion": null
     },
-    "actualizado": "2026-05-09T17:18:56.527694"
+    "actualizado": "2026-05-10T09:21:10.903092"
   },
   {
     "id": 1,
@@ -35,11 +35,11 @@
     "estado": "Activa",
     "tamaño": "Pequeña",
     "contacto": {
-      "telefono": "+57 1 2345678",
-      "website": "https://centrovetbogota.com",
-      "direccion": "Carrera 5 #10-20 Chapinero, Bogota"
+      "telefono": "324 6463853",
+      "website": null,
+      "direccion": null
     },
-    "actualizado": "2026-05-09T17:03:29.412345"
+    "actualizado": "2026-05-10T09:21:19.384564"
   },
   {
     "id": 5,
@@ -49,11 +49,11 @@
     "estado": "Activa",
     "tamaño": "Pequeña",
     "contacto": {
-      "telefono": "+57 1 5678901",
-      "website": "https://paraisovet.co",
-      "direccion": "Cra 7 #125-50 Usaquen, Bogota"
+      "telefono": "316 4539854",
+      "website": null,
+      "direccion": null
     },
-    "actualizado": "2026-05-09T17:03:29.412345"
+    "actualizado": "2026-05-10T09:21:27.867174"
   },
   {
     "id": 2,
@@ -63,10 +63,10 @@
     "estado": "Activa",
     "tamaño": "Mediana",
     "contacto": {
-      "telefono": "+57 4 3456789",
-      "website": "https://clinicamonteverde.co",
-      "direccion": "Calle 50 #45-30 Laureles, Medellin"
+      "telefono": "315 4866362",
+      "website": null,
+      "direccion": null
     },
-    "actualizado": "2026-05-09T17:03:29.412345"
+    "actualizado": "2026-05-10T09:21:36.336970"
   }
 ]

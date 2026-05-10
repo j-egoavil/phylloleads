@@ -7,8 +7,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
-import psycopg2
-from psycopg2.extras import execute_values
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+except Exception:
+    psycopg2 = None
+    execute_values = None
+import sqlite3
 import time
 import logging
 from typing import List, Dict, Any, Optional
@@ -299,18 +304,32 @@ class EmpresasLaRepublicaScraper:
             return "No especificado"
     
     def get_db_connection(self):
-        """Obtiene conexión a PostgreSQL"""
+        """Obtiene conexión a la base de datos.
+
+        Intenta PostgreSQL si `psycopg2` está disponible, si no, usa SQLite
+        y la variable de entorno `APP_DB_PATH`.
+        """
+        # Intentar PostgreSQL si psycopg2 está disponible
+        if psycopg2 is not None:
+            try:
+                conn = psycopg2.connect(
+                    host=self.db_host,
+                    port=self.db_port,
+                    database=self.db_name,
+                    user=self.db_user,
+                    password=self.db_password,
+                )
+                return conn
+            except Exception as e:
+                logger.warning(f"No se pudo conectar a PostgreSQL ({e}), usando SQLite...")
+
+        # Fallback a SQLite
         try:
-            conn = psycopg2.connect(
-                host=self.db_host,
-                port=self.db_port,
-                database=self.db_name,
-                user=self.db_user,
-                password=self.db_password
-            )
+            db_path = os.getenv("APP_DB_PATH", "appdb.sqlite")
+            conn = sqlite3.connect(db_path)
             return conn
         except Exception as e:
-            logger.error(f"Error conectando a base de datos: {e}")
+            logger.error(f"Error conectando a SQLite: {e}")
             return None
     
     def create_tables(self):
@@ -385,56 +404,113 @@ class EmpresasLaRepublicaScraper:
         conn = self.get_db_connection()
         if not conn:
             return False
-        
+
+        # Si psycopg2 está disponible y execute_values también, usar inserción masiva en Postgres
+        if psycopg2 is not None and execute_values is not None:
+            try:
+                cur = conn.cursor()
+                values = []
+                for company in companies:
+                    company["search_niche"] = niche
+                    values.append((
+                        company.get("name"),
+                        company.get("url"),
+                        company.get("rues"),
+                        company.get("city"),
+                        company.get("is_active"),
+                        company.get("status"),
+                        company.get("company_size"),
+                        company.get("search_niche"),
+                        company.get("scraped_at"),
+                    ))
+
+                query = """
+                    INSERT INTO companies 
+                    (name, url, rues, city, is_active, status, company_size, search_niche, scraped_at)
+                    VALUES %s
+                    ON CONFLICT (url) 
+                    DO UPDATE SET 
+                        name = EXCLUDED.name,
+                        is_active = EXCLUDED.is_active,
+                        status = EXCLUDED.status,
+                        company_size = EXCLUDED.company_size,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING id;
+                """
+
+                execute_values(cur, query, values)
+                conn.commit()
+                affected_rows = cur.rowcount
+                cur.close()
+                logger.info(f"Guardadas/actualizadas {affected_rows} empresas (Postgres)")
+                return True
+            except Exception as e:
+                logger.error(f"Error guardando empresas en Postgres: {e}")
+                try:
+                    conn.close()
+                except:
+                    pass
+                return False
+
+        # Fallback: SQLite (insertar una por una)
         try:
             cur = conn.cursor()
-            
-            # Preparar datos para insert
-            values = []
             for company in companies:
                 company["search_niche"] = niche
-                values.append((
-                    company.get("name"),
-                    company.get("url"),
-                    company.get("rues"),
-                    company.get("city"),
-                    company.get("is_active"),
-                    company.get("status"),
-                    company.get("company_size"),
-                    company.get("search_niche"),
-                    company.get("scraped_at")
-                ))
-            
-            # Insert con ON CONFLICT para evitar duplicados
-            query = """
-                INSERT INTO companies 
-                (name, url, rues, city, is_active, status, company_size, search_niche, scraped_at)
-                VALUES %s
-                ON CONFLICT (url) 
-                DO UPDATE SET 
-                    name = EXCLUDED.name,
-                    is_active = EXCLUDED.is_active,
-                    status = EXCLUDED.status,
-                    company_size = EXCLUDED.company_size,
-                    updated_at = CURRENT_TIMESTAMP
-                RETURNING id;
-            """
-            
-            execute_values(cur, query, values)
+                try:
+                    cur.execute(
+                        """
+                        INSERT OR IGNORE INTO companies
+                        (name, url, rues, city, is_active, status, company_size, search_niche, scraped_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            company.get("name"),
+                            company.get("url"),
+                            company.get("rues"),
+                            company.get("city"),
+                            int(bool(company.get("is_active"))),
+                            company.get("status"),
+                            company.get("company_size"),
+                            company.get("search_niche"),
+                            company.get("scraped_at"),
+                        ),
+                    )
+                    # Si ya existía, intentar actualizar
+                    cur.execute(
+                        """
+                        UPDATE companies
+                        SET name = ?, is_active = ?, status = ?, company_size = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE url = ?
+                        """,
+                        (
+                            company.get("name"),
+                            int(bool(company.get("is_active"))),
+                            company.get("status"),
+                            company.get("company_size"),
+                            company.get("url"),
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(f"Error insertando/actualizando empresa {company.get('name')}: {e}")
+                    continue
+
             conn.commit()
-            
-            affected_rows = cur.rowcount
             cur.close()
-            
-            logger.info(f"Guardadas/actualizadas {affected_rows} empresas")
+            logger.info(f"Guardadas/actualizadas {len(companies)} empresas (SQLite)")
+            try:
+                conn.close()
+            except:
+                pass
             return True
-        
+
         except Exception as e:
-            logger.error(f"Error guardando empresas: {e}")
+            logger.error(f"Error guardando empresas en SQLite: {e}")
+            try:
+                conn.close()
+            except:
+                pass
             return False
-        
-        finally:
-            conn.close()
     
     def get_companies_by_niche(self, niche: str) -> List[Dict[str, Any]]:
         """
