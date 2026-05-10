@@ -6,20 +6,30 @@ FROM oven/bun:latest
 
 WORKDIR /app
 
-# Copiar package.json y bun.lock
-COPY package.json bun.lock ./
+# Instalar curl para healthcheck
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Instalar dependencias
-RUN bun install --frozen-lockfile
+# Copiar package.json y bun.lock
+COPY package.json bun.lock* ./
+
+# Instalar dependencias (sin frozen-lockfile en dev para más flexibilidad)
+RUN bun install
 
 # Copiar código fuente
 COPY . .
+
+# Variables de entorno
+ARG VITE_API_URL=http://backend:8000
+ARG VITE_WS_URL=ws://backend:8000
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_WS_URL=${VITE_WS_URL}
+ENV NODE_ENV=development
 
 # Exponer puerto (Vite en desarrollo)
 EXPOSE 5173
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl --silent --fail http://localhost:5173 || exit 1
 
 # Iniciar servidor de desarrollo

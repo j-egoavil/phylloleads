@@ -17,7 +17,12 @@ RUN bun install --frozen-lockfile
 # Copiar código fuente
 COPY . .
 
-# Hacer build (para precompilar si es posible)
+# Hacer build con variables de entorno
+ARG VITE_API_URL=http://backend:8000
+ARG VITE_WS_URL=ws://backend:8000
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_WS_URL=${VITE_WS_URL}
+
 RUN bun run build || true
 
 # =============================================================================
@@ -38,6 +43,13 @@ COPY . .
 
 # Copiar archivos compilados desde el builder (si existen)
 COPY --from=builder /app/dist ./dist
+
+# Variables de entorno por defecto
+ARG VITE_API_URL=http://backend:8000
+ARG VITE_WS_URL=ws://backend:8000
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_WS_URL=${VITE_WS_URL}
+ENV NODE_ENV=production
 
 # Puerto donde se ejecuta TanStack Start
 EXPOSE 3000

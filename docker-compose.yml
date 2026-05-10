@@ -7,52 +7,30 @@ version: "3.9"
 
 services:
   # =========================================================================
-  # FRONTEND - React + Vite (TanStack Start SSR con Bun)
+  # FRONTEND - React + Vite (TanStack Start Dev Server)
   # =========================================================================
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: phylloleads_frontend
     ports:
-      - "3000:8080"
+      - "5173:5173"
     environment:
-      # Aquí van variables de entorno si las necesita
-      VITE_API_URL: http://localhost:8000/api
+      VITE_API_URL: http://backend:8000
+      VITE_WS_URL: ws://backend:8000
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - phylloleads_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-
-  # =========================================================================
-  # FRONTEND-DEV - Para desarrollo con hot-reload
-  # DESCOMENTA ESTO si prefieres desarrollo en lugar del anterior
-  # =========================================================================
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile.dev
-  #   container_name: phylloleads_frontend_dev
-  #   ports:
-  #     - "5173:5173"  # Puerto de Vite
-  #   volumes:
-  #     - ./frontend:/app
-  #     - /app/node_modules  # No montar node_modules del host
-  #   environment:
-  #     VITE_API_URL: http://localhost:8000/api
-  #   depends_on:
-  #     - backend
-  #   stdin_open: true
-  #   tty: true
-  #   networks:
-  #     - phylloleads_network
+    stdin_open: true
+    tty: true
 
   # =========================================================================
   # BACKEND - FastAPI + Scrapers
@@ -72,6 +50,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       APP_DB_PATH: /app/appdb.sqlite
       PYTHONUNBUFFERED: 1
+      SQLITE_DB: /app/appdb.sqlite
     depends_on:
       database:
         condition: service_healthy
@@ -82,6 +61,12 @@ services:
       - ./backend:/app
       - ./backend/test_results:/app/test_results
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   # =========================================================================
   # DATABASE - PostgreSQL

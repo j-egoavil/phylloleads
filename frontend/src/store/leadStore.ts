@@ -94,14 +94,10 @@ export const useLeadStore = create<LeadState>((set, get) => ({
   hydrate: () => {
     if (get().hydrated) return;
     set({
-      leads: seedLeads(),
-      scrapeLogs: [
-        { id: "s1", source: "google_maps", at: new Date(Date.now() - 600_000).toISOString(), extracted: 24 },
-        { id: "s2", source: "rues", at: new Date(Date.now() - 1800_000).toISOString(), extracted: 17 },
-        { id: "s3", source: "la_republica", at: new Date(Date.now() - 3600_000).toISOString(), extracted: 12 },
-      ],
-      queueProgress: 42,
-      nextRunAt: Date.now() + 5 * 60 * 1000,
+      leads: [],
+      scrapeLogs: [],
+      queueProgress: 0,
+      nextRunAt: 0,
       hydrated: true,
     });
   },
