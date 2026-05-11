@@ -659,8 +659,13 @@ def run_scraper_for_niche(niche: str, target_count: int):
         
         enriched_companies = []
         for idx, company in enumerate(companies, 1):
+            # LIMITAR A 10 EMPRESAS PARA PRUEBAS RÁPIDAS
+            if idx > 10:
+                break
+            
             raw_name = company.get('name', 'Unknown')
             city = company.get('city', 'Unknown')
+            company_url = company.get('url', '')  # URL de La República
             
             # Limpiar el nombre: extrae solo la parte antes del "-"
             # Ejemplo: "NOMBRE S.A.S - Registro Único..." → "NOMBRE S.A.S"
@@ -668,14 +673,17 @@ def run_scraper_for_niche(niche: str, target_count: int):
             company_name = company_name.split('Registro')[0].strip() if 'Registro' in company_name else company_name
             
             try:
-                print(f"   [{idx}/{len(companies)}] {company_name} ({city})...", end="", flush=True)
+                print(f"   [{idx}/10] {company_name} ({city})...", end="", flush=True)
                 
-                # Usar AutomaticDataScraper para buscar en múltiples fuentes
-                contact_info = enricher.scrape_company(
-                    idx,
-                    company_name,
-                    city
-                )
+                contact_info = None
+                
+                if not contact_info:
+                    contact_info = enricher.scrape_company(
+                        idx,
+                        company_name,
+                        city,
+                        company_url  # Pasar URL de La República
+                    )
                 
                 enriched = {
                     'id': idx,
@@ -683,12 +691,16 @@ def run_scraper_for_niche(niche: str, target_count: int):
                     'company': company_name,
                     'email': contact_info.get('email') or '',
                     'phone': contact_info.get('phone') or 'N/A',
+                    'nit': contact_info.get('nit') or company.get('nit', 'N/A'),
                     'website': contact_info.get('website') or company.get('website', 'N/A'),
                     'address': contact_info.get('address') or company.get('address', 'N/A'),
+                    'activity': contact_info.get('activity') or 'N/A',
+                    'employees': contact_info.get('employees') or 'N/A',
+                    'legal_status': contact_info.get('legal_status') or company.get('status', 'N/A'),
                     'city': city,
                     'niche': niche,
                     'url': company.get('url', ''),
-                    'sources': ', '.join(contact_info.get('sources', [])),
+                    'sources': ', '.join(contact_info.get('sources', [])) if contact_info.get('sources') else '',
                     'source': 'pipeline_multi_source',
                 }
                 enriched_companies.append(enriched)
@@ -696,8 +708,8 @@ def run_scraper_for_niche(niche: str, target_count: int):
                 status = contact_info.get('status', 'partial')
                 print(f" ✓ [{status}]")
                 
-                # Google Maps necesita pausa más larga para no ser bloqueado
-                time.sleep(5)
+                # Pausa corta
+                time.sleep(3)
                 
             except Exception as e:
                 logger.warning(f"   Error enriqueciendo {company_name}: {e}")
@@ -743,4 +755,4 @@ def run_scraper_for_niche(niche: str, target_count: int):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=12001)

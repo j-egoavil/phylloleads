@@ -29,7 +29,7 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Exponer puerto
-EXPOSE 8000
+EXPOSE 12001
 
 # Variables de entorno por defecto
 ENV DB_HOST=postgres \
