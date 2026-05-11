@@ -4,14 +4,12 @@ import { LayoutDashboard, Settings, BarChart3, Radar, Bell, Play, Pause, Moon, S
 import { useLeadStore } from "@/store/leadStore";
 import { useFetchLeads } from "@/hooks/useFetchLeads";
 import { ScraperModal } from "@/components/dashboard/ScraperModal";
+import { getApiUrl } from "@/lib/apiConfig";
 import { toast } from "sonner";
 
 // Temporary function to start scraper - will be called from dashboard component
 async function startScraperAsync(niches: string[], targetCount: number) {
-  // Use localhost for development, auto-detect in production
-  const API_URL = typeof window !== 'undefined' 
-    ? `${window.location.protocol}//${window.location.hostname}:12001`
-    : 'http://localhost:12001';
+  const API_URL = getApiUrl();
   try {
     const response = await fetch(`${API_URL}/api/scraper/start`, {
       method: 'POST',

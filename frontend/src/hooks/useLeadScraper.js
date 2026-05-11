@@ -8,8 +8,10 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useLeadStore } from '@/store/leadStore'
+import { getApiUrl, getWsUrl } from '@/lib/apiConfig'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:12001'
+const getAPI_URL = () => getApiUrl()
+const getWS_URL = () => getWsUrl()
 
 export function useLeadScraper() {
   const [scraping, setScraping] = useState(false)
@@ -29,7 +31,7 @@ export function useLeadScraper() {
     if (scraping) {
       try {
         // Construir URL WebSocket desde API_URL para asegurar host/puerto correcto
-        const apiUrlObj = new URL(API_URL)
+        const apiUrlObj = new URL(getAPI_URL())
         const wsProtocol = apiUrlObj.protocol === 'https:' ? 'wss' : 'ws'
         const wsUrl = `${wsProtocol}://${apiUrlObj.host}/api/scraper/ws`
         
@@ -102,7 +104,7 @@ export function useLeadScraper() {
       setSelectedNiches(niches)
       setTargetCount(target)
       
-      const response = await fetch(`${API_URL}/api/scraper/start`, {
+      const response = await fetch(`${getAPI_URL()}/api/scraper/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -144,7 +146,7 @@ export function useLeadScraper() {
   // Obtener siguiente lead
   const getNextLead = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/scraper/next-lead`)
+      const response = await fetch(`${getAPI_URL()}/api/scraper/next-lead`)
       
       if (!response.ok) {
         const contentType = response.headers.get('content-type')
@@ -201,7 +203,7 @@ export function useLeadScraper() {
   const acceptLead = useCallback(async (leadId, niche) => {
     try {
       const response = await fetch(
-        `${API_URL}/api/scraper/accept-lead/${leadId}`,
+        `${getAPI_URL()}/api/scraper/accept-lead/${leadId}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -246,7 +248,7 @@ export function useLeadScraper() {
   // Obtener estado
   const requestStatus = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/scraper/status`)
+      const response = await fetch(`${getAPI_URL()}/api/scraper/status`)
       
       if (!response.ok) {
         console.error(`Status request failed: ${response.status}`)
@@ -300,7 +302,7 @@ export function useLead(leadId) {
     const fetchLead = async () => {
       setLoading(true)
       try {
-        const response = await fetch(`${API_URL}/api/companies/${leadId}`)
+        const response = await fetch(`${getAPI_URL()}/api/companies/${leadId}`)
         const data = await response.json()
         
         if (data.success) {
