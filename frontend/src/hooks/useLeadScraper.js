@@ -9,7 +9,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useLeadStore } from '@/store/leadStore'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:12001'
 
 export function useLeadScraper() {
   const [scraping, setScraping] = useState(false)

@@ -10,8 +10,8 @@ import { toast } from "sonner";
 async function startScraperAsync(niches: string[], targetCount: number) {
   // Use localhost for development, auto-detect in production
   const API_URL = typeof window !== 'undefined' 
-    ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : 'http://localhost:8000';
+    ? `${window.location.protocol}//${window.location.hostname}:12001`
+    : 'http://localhost:12001';
   try {
     const response = await fetch(`${API_URL}/api/scraper/start`, {
       method: 'POST',
