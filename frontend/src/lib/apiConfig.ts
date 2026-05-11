@@ -16,9 +16,9 @@ export function getApiUrl(): string {
     return `${protocol}//${hostname}:12001`;
   }
 
-  // En producción (app.orbit.best, etc), usar rutas relativas
-  // El nginx redirige /api/* al backend interno
-  return `${protocol}//${hostname}/api`;
+  // En producción, usar string vacío para rutas relativas
+  // El nginx redirige /api/* al backend automáticamente
+  return '';
 }
 
 export function getWsUrl(): string {
@@ -35,6 +35,6 @@ export function getWsUrl(): string {
     return `${wsProtocol}//${hostname}:12001`;
   }
 
-  // En producción, usar rutas relativas
-  return `${wsProtocol}//${hostname}/api`;
+  // En producción, usar rutas relativas con el mismo host
+  return `${wsProtocol}//${hostname}`;
 }

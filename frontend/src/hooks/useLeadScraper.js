@@ -30,10 +30,9 @@ export function useLeadScraper() {
   useEffect(() => {
     if (scraping) {
       try {
-        // Construir URL WebSocket desde API_URL para asegurar host/puerto correcto
-        const apiUrlObj = new URL(getAPI_URL())
-        const wsProtocol = apiUrlObj.protocol === 'https:' ? 'wss' : 'ws'
-        const wsUrl = `${wsProtocol}://${apiUrlObj.host}/api/scraper/ws`
+        // Construir URL WebSocket usando la función dedicada
+        const wsBaseUrl = getWS_URL()
+        const wsUrl = `${wsBaseUrl}/api/scraper/ws`
         
         const ws = new WebSocket(wsUrl)
         let heartbeatInterval = null
