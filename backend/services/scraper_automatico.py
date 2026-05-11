@@ -406,7 +406,8 @@ class AutomaticDataScraper:
                             if value and not results[key]:
                                 results[key] = value
                         results['sources'].append(source_name)
-                    time.sleep(2)
+                    # Google Maps y Google Web necesitan delays más largos
+                    time.sleep(5) if source_name.startswith('google') else time.sleep(3)
                 except:
                     pass
                 

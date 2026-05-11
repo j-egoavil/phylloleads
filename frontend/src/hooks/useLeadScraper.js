@@ -1,12 +1,13 @@
-"""
-Hook de React para integración con API de Phylloleads
-- Inicia scraper
-- Obtiene leads en tiempo real
-- Marca leads como aceptados
-- Actualiza estado
-"""
+/**
+ * Hook de React para integración con API de Phylloleads
+ * - Inicia scraper
+ * - Obtiene leads en tiempo real
+ * - Marca leads como aceptados
+ * - Actualiza estado
+ */
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useLeadStore } from '@/store/leadStore'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -19,48 +20,75 @@ export function useLeadScraper() {
   const [targetCount, setTargetCount] = useState(50)
   const [error, setError] = useState(null)
   const wsRef = useRef(null)
+  
+  // Conectar con el store
+  const addLead = useLeadStore((s) => s.addLead)
 
   // Conectar WebSocket
   useEffect(() => {
     if (scraping) {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const wsUrl = `${protocol}://${window.location.host}/api/scraper/ws`
-      
-      const ws = new WebSocket(wsUrl)
-      
-      ws.onopen = () => {
-        console.log('WebSocket conectado')
-        requestStatus()
-      }
-      
-      ws.onmessage = (event) => {
-        const message = JSON.parse(event.data)
+      try {
+        // Construir URL WebSocket desde API_URL para asegurar host/puerto correcto
+        const apiUrlObj = new URL(API_URL)
+        const wsProtocol = apiUrlObj.protocol === 'https:' ? 'wss' : 'ws'
+        const wsUrl = `${wsProtocol}://${apiUrlObj.host}/api/scraper/ws`
         
-        if (message.type === 'status_update') {
-          setStatus(message.data)
-        } else if (message.type === 'new_lead') {
-          setCurrentLead(message.lead)
-          setLeads(prev => [...prev, message.lead])
-        } else if (message.type === 'lead_accepted') {
-          setStatus(message.status)
+        const ws = new WebSocket(wsUrl)
+        let heartbeatInterval = null
+        
+        ws.onopen = () => {
+          console.log('WebSocket conectado')
+          requestStatus()
+          // Enviar heartbeat cada 30 segundos para mantener conexión viva
+          heartbeatInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'ping' }))
+            }
+          }, 30000)
         }
-      }
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        setError('Error en conexión WebSocket')
-      }
-      
-      ws.onclose = () => {
-        console.log('WebSocket desconectado')
-      }
-      
-      wsRef.current = ws
-      
-      return () => {
-        if (wsRef.current) {
-          wsRef.current.close()
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            
+            if (message.type === 'status_update') {
+              setStatus(message.data)
+            } else if (message.type === 'new_lead') {
+              setCurrentLead(message.lead)
+              setLeads(prev => [...prev, message.lead])
+            } else if (message.type === 'lead_accepted') {
+              setStatus(message.status)
+            }
+          } catch (parseErr) {
+            console.error('Error parsing WebSocket message:', parseErr)
+          }
         }
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          setError('Error en conexión WebSocket')
+        }
+        
+        ws.onclose = () => {
+          console.log('WebSocket desconectado')
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval)
+          }
+        }
+        
+        wsRef.current = ws
+        
+        return () => {
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval)
+          }
+          if (wsRef.current) {
+            wsRef.current.close()
+          }
+        }
+      } catch (err) {
+        console.error('WebSocket initialization error:', err)
+        setError('Error inicializando WebSocket: ' + err.message)
       }
     }
   }, [scraping])
@@ -84,6 +112,20 @@ export function useLeadScraper() {
         })
       })
       
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type')
+        let errorMsg = `HTTP Error: ${response.status} ${response.statusText}`
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json()
+            errorMsg = errorData.detail || errorMsg
+          } catch (e) {
+            // Si no puede parsear JSON, usa el mensaje genérico
+          }
+        }
+        throw new Error(errorMsg)
+      }
+      
       const data = await response.json()
       
       if (!data.success) {
@@ -103,35 +145,95 @@ export function useLeadScraper() {
   const getNextLead = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/api/scraper/next-lead`)
+      
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type')
+        let errorMsg = `Error ${response.status}: ${response.statusText}`
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json()
+            errorMsg = errorData.detail || errorMsg
+          } catch (e) {
+            // Si no puede parsear JSON, usa el mensaje genérico
+          }
+        }
+        throw new Error(errorMsg)
+      }
+      
       const data = await response.json()
       
       if (data.success) {
-        setCurrentLead(data.lead)
+        const lead = {
+          id: `${data.lead.id}`,
+          name: data.lead.name,
+          phone: data.lead.phone,
+          website: data.lead.website,
+          address: data.lead.address,
+          city: data.lead.city,
+          niche: data.lead.niche,
+          status: 'search',
+          source: 'la_republica',
+          createdAt: new Date().toISOString(),
+          rues: { validated: false },
+          score: data.lead.score,
+          category: data.lead.category,
+        }
+        setCurrentLead(lead)
+        setLeads(prev => [...prev, lead])
+        addLead(lead) // Agregar al store
         setStatus(data.queue_status)
+        
+        // Solicitar siguiente lead automáticamente
+        setTimeout(() => getNextLead(), 500)
       } else {
+        setError(data.message || 'No hay más leads disponibles')
+        setScraping(false)
         console.log(data.message)
       }
     } catch (err) {
       setError(err.message)
+      setScraping(false)
+      console.error('Error en getNextLead:', err)
     }
-  }, [])
+  }, [addLead])
 
   // Aceptar lead
   const acceptLead = useCallback(async (leadId, niche) => {
     try {
       const response = await fetch(
-        `${API_URL}/api/scraper/accept-lead/${leadId}?niche=${niche}`,
-        { method: 'POST' }
+        `${API_URL}/api/scraper/accept-lead/${leadId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ niche })
+        }
       )
+      
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type')
+        let errorMsg = `Error ${response.status}: ${response.statusText}`
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json()
+            errorMsg = errorData.detail || errorMsg
+          } catch (e) {
+            // Si no puede parsear JSON, usa el mensaje genérico
+          }
+        }
+        throw new Error(errorMsg)
+      }
       
       const data = await response.json()
       
       if (data.success) {
         // Solicitar siguiente lead
         setTimeout(() => getNextLead(), 500)
+      } else {
+        setError(data.detail || 'Error aceptando lead')
       }
     } catch (err) {
       setError(err.message)
+      console.error('Error en acceptLead:', err)
     }
   }, [getNextLead])
 
@@ -145,10 +247,17 @@ export function useLeadScraper() {
   const requestStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/api/scraper/status`)
+      
+      if (!response.ok) {
+        console.error(`Status request failed: ${response.status}`)
+        return
+      }
+      
       const data = await response.json()
       setStatus(data)
     } catch (err) {
       console.error('Error obteniendo estado:', err)
+      // No setear error global aquí porque es una solicitud de background
     }
   }, [])
 

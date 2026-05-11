@@ -60,6 +60,17 @@ class LeadResponse(BaseModel):
     timestamp: str
 
 
+class AcceptLeadRequest(BaseModel):
+    """Solicitud para aceptar un lead"""
+    niche: str
+
+
+class SubmitLeadsRequest(BaseModel):
+    """Solicitud para enviar leads nuevos"""
+    niche: str
+    leads: List[dict]
+
+
 # Endpoints
 @router.post("/start")
 async def start_scraper(request: StartScraperRequest):
@@ -71,9 +82,17 @@ async def start_scraper(request: StartScraperRequest):
     if request.target_count < 1 or request.target_count > 10000:
         raise HTTPException(status_code=400, detail="target_count debe estar entre 1 y 10000")
     
+    print(f"\n{'='*60}")
+    print(f"🎯 SCRAPER START ENDPOINT CALLED")
+    print(f"📋 Niches received: {request.niches}")
+    print(f"🎯 Target count: {request.target_count}")
+    print(f"{'='*60}\n")
+    
     # Agregar nichos a la cola
     for niche in request.niches:
+        print(f"➕ Adding niche to queue: {niche}")
         lead_queue.add_niche(niche, request.target_count)
+        print(f"✅ Queue status: {lead_queue.scraping_status.get(niche, {})}")
     
     # Broadcast de inicio
     await manager.broadcast({
@@ -82,6 +101,10 @@ async def start_scraper(request: StartScraperRequest):
         'target_count': request.target_count,
         'timestamp': datetime.now().isoformat()
     })
+    
+    print(f"📢 Broadcast sent. Current scraping status:")
+    for niche, status in lead_queue.scraping_status.items():
+        print(f"  {niche}: {status}")
     
     return {
         'success': True,
@@ -92,14 +115,17 @@ async def start_scraper(request: StartScraperRequest):
 
 
 @router.post("/submit-leads")
-async def submit_leads(niche: str, leads: List[dict]):
+async def submit_leads(request: SubmitLeadsRequest):
     """
     Backend de scraper envía leads nuevos
     Solo agrega leads que no fueron enviados previamente
     """
     
+    niche = request.niche
+    leads = request.leads
+    
     if not niche or not leads:
-        return {'added': 0, 'duplicates': 0}
+        raise HTTPException(status_code=400, detail="Debe especificar niche y leads")
     
     # Filtrar duplicados
     new_leads = []
@@ -116,6 +142,7 @@ async def submit_leads(niche: str, leads: List[dict]):
     added = lead_queue.queue_leads(niche, new_leads)
     
     return {
+        'success': True,
         'added': added,
         'duplicates': duplicates,
         'queued': len(lead_queue.niches_queue.get(niche, []))
@@ -171,9 +198,10 @@ async def get_next_lead(niche: Optional[str] = None):
 
 
 @router.post("/accept-lead/{lead_id}")
-async def accept_lead(lead_id: int, niche: str):
+async def accept_lead(lead_id: int, request: AcceptLeadRequest):
     """Frontend acepta un lead (marca como enviado)"""
     
+    niche = request.niche
     lead_queue.mark_as_sent(niche, lead_id)
     
     # Broadcast

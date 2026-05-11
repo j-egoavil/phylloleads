@@ -8,6 +8,7 @@ import sqlite3
 import time
 import sys
 from pathlib import Path
+import asyncio
 
 # Agregar servicios al path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -16,6 +17,8 @@ from services.scraper_la_republica import EmpresasLaRepublicaScraper
 from services.scraper_automatico import AutomaticDataScraper
 from app.routes.scraper import router as scraper_router
 from app.routes.companies import router as companies_router
+from services.lead_queue import lead_queue
+from app.routes.scraper import manager
 from datetime import datetime
 
 # Configurar logging
@@ -551,6 +554,192 @@ async def startup_event():
     scraper = get_scraper()
     scraper.create_tables()
     logger.info("✅ Tablas de base de datos verificadas/creadas")
+    
+    # Limpiar estados inicializados de reinicios anteriores
+    lead_queue.scraping_status.clear()
+    logger.info("🧹 Estados de scraping limpiados")
+    
+    # Iniciar background task de scraping
+    asyncio.create_task(background_scraper_task())
+
+
+async def background_scraper_task():
+    """
+    Background task que continuamente chequea nichos en cola y lanza el scraper
+    Ejecuta en paralelo con la API
+    """
+    logger.info("🔄 Background scraper task iniciado")
+    
+    # Esperar a que la app esté lista
+    await asyncio.sleep(2)
+    
+    while True:
+        try:
+            # Chequear nichos que necesitan scraping (estado initialized)
+            niches_to_scrape = [
+                niche for niche, status in lead_queue.scraping_status.items()
+                if status.get('status') == 'initialized'
+            ]
+            
+            if niches_to_scrape:
+                logger.info(f"📊 Nichos a scrapear: {niches_to_scrape}")
+                
+                for niche in niches_to_scrape:
+                    status = lead_queue.scraping_status.get(niche, {})
+                    target = status.get('target', 100)
+                    
+                    logger.info(f"🔍 Iniciando scraper para: {niche} (objetivo: {target})")
+                    
+                    try:
+                        # Ejecutar scraper en thread pool para no bloquear
+                        await asyncio.to_thread(run_scraper_for_niche, niche, target)
+                    except Exception as e:
+                        logger.error(f"❌ Error scraping {niche}: {e}", exc_info=True)
+                        lead_queue.scraping_status[niche]['status'] = 'error'
+            
+            # Esperar antes de siguiente chequeo (reducido a 3 segundos)
+            await asyncio.sleep(3)
+            
+        except Exception as e:
+            logger.error(f"Error en background scraper task: {e}", exc_info=True)
+            await asyncio.sleep(3)
+
+
+def run_scraper_for_niche(niche: str, target_count: int):
+    """
+    Ejecuta el scraper para un nicho específico con pipeline multi-fuente:
+    1. La República: obtiene tabla de empresas
+    2. Google Maps: obtiene contacto
+    3. Páginas Amarillas: obtiene más contacto
+    4. Enriquecimiento y scoring
+    Se ejecuta en thread pool para no bloquear la API
+    """
+    try:
+        print(f"\n{'='*80}")
+        print(f"🚀 PIPELINE SCRAPER INICIADO: '{niche}' (target: {target_count})")
+        print(f"  Fuentes: La República → Google Maps → Páginas Amarillas")
+        print(f"{'='*80}\n")
+        
+        logger.info(f"📥 Pipeline iniciado para: {niche}")
+        lead_queue.scraping_status[niche]['status'] = 'running'
+        
+        # PASO 1: Obtener empresas de La República
+        print(f"\n[1/3] 📰 Scrapeando La República para '{niche}'...")
+        republica_scraper = EmpresasLaRepublicaScraper(
+            db_host=os.getenv("DB_HOST", "localhost"),
+            db_port=int(os.getenv("DB_PORT", "5432")),
+            db_name=os.getenv("DB_NAME", "appdb"),
+            db_user=os.getenv("DB_USER", "postgres"),
+            db_password=os.getenv("DB_PASSWORD", "postgres"),
+            headless=True
+        )
+        
+        logger.info(f"🌐 Descargando sitemaps para: {niche}")
+        result = republica_scraper.search_by_niche(niche, target_count)
+        
+        if not result or not result.get('success'):
+            logger.warning(f"⚠️ La República retornó resultado vacío para: {niche}")
+            print(f"⚠️ La República no encontró empresas para {niche}\n")
+            lead_queue.scraping_status[niche]['status'] = 'empty'
+            return
+        
+        companies = result.get('companies', [])
+        logger.info(f"✅ Obtenidas {len(companies)} empresas de La República para: {niche}")
+        print(f"   ✓ {len(companies)} empresas encontradas\n")
+        
+        # PASO 2: Enriquecer con información de contacto (Maps, Páginas Amarillas, etc)
+        print(f"[2/3] 🗺️  Enriqueciendo con información de contacto...")
+        enricher = AutomaticDataScraper(
+            db_host=os.getenv("DB_HOST", "localhost"),
+            db_port=int(os.getenv("DB_PORT", "5432")),
+            db_name=os.getenv("DB_NAME", "appdb"),
+            db_user=os.getenv("DB_USER", "postgres"),
+            db_password=os.getenv("DB_PASSWORD", "postgres")
+        )
+        
+        enriched_companies = []
+        for idx, company in enumerate(companies, 1):
+            raw_name = company.get('name', 'Unknown')
+            city = company.get('city', 'Unknown')
+            
+            # Limpiar el nombre: extrae solo la parte antes del "-"
+            # Ejemplo: "NOMBRE S.A.S - Registro Único..." → "NOMBRE S.A.S"
+            company_name = raw_name.split('-')[0].strip() if '-' in raw_name else raw_name
+            company_name = company_name.split('Registro')[0].strip() if 'Registro' in company_name else company_name
+            
+            try:
+                print(f"   [{idx}/{len(companies)}] {company_name} ({city})...", end="", flush=True)
+                
+                # Usar AutomaticDataScraper para buscar en múltiples fuentes
+                contact_info = enricher.scrape_company(
+                    idx,
+                    company_name,
+                    city
+                )
+                
+                enriched = {
+                    'id': idx,
+                    'name': company_name,
+                    'company': company_name,
+                    'email': contact_info.get('email') or '',
+                    'phone': contact_info.get('phone') or 'N/A',
+                    'website': contact_info.get('website') or company.get('website', 'N/A'),
+                    'address': contact_info.get('address') or company.get('address', 'N/A'),
+                    'city': city,
+                    'niche': niche,
+                    'url': company.get('url', ''),
+                    'sources': ', '.join(contact_info.get('sources', [])),
+                    'source': 'pipeline_multi_source',
+                }
+                enriched_companies.append(enriched)
+                
+                status = contact_info.get('status', 'partial')
+                print(f" ✓ [{status}]")
+                
+                # Google Maps necesita pausa más larga para no ser bloqueado
+                time.sleep(5)
+                
+            except Exception as e:
+                logger.warning(f"   Error enriqueciendo {company_name}: {e}")
+                print(f" ⚠️ (error)")
+                # Igual agregar con info básica
+                enriched_companies.append({
+                    'id': idx,
+                    'name': company_name,
+                    'company': company_name,
+                    'email': '',
+                    'phone': 'N/A',
+                    'website': company.get('website', 'N/A'),
+                    'address': company.get('address', 'N/A'),
+                    'city': city,
+                    'niche': niche,
+                    'url': company.get('url', ''),
+                    'sources': 'error_enriquecimiento',
+                    'source': 'pipeline_incomplete',
+                })
+        
+        logger.info(f"✅ Enriquecidas {len(enriched_companies)} empresas")
+        print(f"   ✓ {len(enriched_companies)} empresas enriquecidas\n")
+        
+        # PASO 3: Agregar a la cola con información completa
+        print(f"[3/3] 📍 Agregando leads a la cola...")
+        added_to_queue = lead_queue.queue_leads(niche, enriched_companies)
+        
+        logger.info(f"📍 Agregadas {added_to_queue} empresas a la cola de {niche}")
+        print(f"   ✓ {added_to_queue} leads agregados a la cola\n")
+        
+        print(f"{'='*80}")
+        print(f"✅ PIPELINE COMPLETADO: {len(enriched_companies)} leads para '{niche}'")
+        print(f"{'='*80}\n")
+        
+        lead_queue.scraping_status[niche]['status'] = 'completed'
+    
+    except Exception as e:
+        logger.error(f"❌ Error en pipeline para {niche}: {e}")
+        print(f"❌ PIPELINE ERROR for {niche}: {e}\n")
+        lead_queue.scraping_status[niche]['status'] = 'error'
+        import traceback
+        logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
     import uvicorn

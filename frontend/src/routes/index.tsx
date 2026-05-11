@@ -23,9 +23,11 @@ function Dashboard() {
   const leads = useLeadStore((s) => s.leads);
   const filters = useLeadStore((s) => s.filters);
   const setFilter = useLeadStore((s) => s.setFilter);
+  const addLeads = useLeadStore((s) => s.addLeads);
 
   const [searchInput, setSearchInput] = useState(filters.search);
   const debouncedSearch = useDebounced(searchInput, 300);
+
   useEffect(() => { setFilter("search", debouncedSearch); }, [debouncedSearch, setFilter]);
 
   const metrics = useMemo(() => {
@@ -129,6 +131,7 @@ function Dashboard() {
         </div>
         <LeadTable limit={15} />
       </div>
+
     </div>
   );
 }

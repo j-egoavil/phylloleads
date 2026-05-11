@@ -65,9 +65,9 @@ function LeadDetail() {
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">{SOURCE_LABELS[lead.source]}</div>
-            <h1 className="text-3xl font-bold mt-1">{lead.company}</h1>
-            <p className="text-muted-foreground mt-1">{lead.name}</p>
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">{lead.niche || 'General'}</div>
+            <h1 className="text-3xl font-bold mt-1">{lead.name || 'Sin nombre'}</h1>
+            <p className="text-muted-foreground mt-1">{lead.city || 'Ciudad desconocida'}</p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={handleEnrich} className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background hover:bg-accent px-3 py-2 text-sm font-medium">
@@ -91,42 +91,15 @@ function LeadDetail() {
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <h3 className="text-sm font-semibold mb-4">Información de contacto</h3>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              <Field icon={Building2} label="NIT" value={lead.nit} />
+              <Field icon={Building2} label="Nicho" value={lead.niche} />
               <Field icon={Phone} label="Teléfono" value={lead.phone} />
-              <Field icon={Mail} label="Email" value={lead.email} />
+              <Field icon={Mail} label="Website" value={lead.website} />
               <Field icon={MapPin} label="Dirección" value={lead.address} />
             </dl>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-semibold mb-4">Historial de fases</h3>
-            <ol className="relative border-l border-border ml-2 space-y-4">
-              {lead.history.map((h, i) => (
-                <li key={i} className="ml-4">
-                  <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-primary border-2 border-card" />
-                  <div className="text-sm font-medium">{STATUS_LABELS[h.phase]}</div>
-                  <div className="text-xs text-muted-foreground tabular-nums" title={formatRelative(h.at)}>{formatAbsolute(h.at)}</div>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><FileCheck2 className="h-4 w-4 text-primary" /> Validación RUES</h3>
-            {lead.rues ? (
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${lead.rues.validated ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"}`}>
-                    {lead.rues.validated ? "✓ Validado" : "✗ No validado"}
-                  </span>
-                </div>
-                {lead.rues.matricula && <div><span className="text-muted-foreground">Matrícula:</span> <span className="font-medium">{lead.rues.matricula}</span></div>}
-                {lead.rues.registrationDate && <div><span className="text-muted-foreground">Fecha de registro:</span> <span className="font-medium">{formatAbsolute(lead.rues.registrationDate)}</span></div>}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">Sin información RUES disponible.</div>
-            )}
-          </div>
+          {/* Sección de historial omitida - no disponible en API */}
+          {/* Sección de validación RUES omitida - no disponible en API */}
         </div>
 
         <div className="space-y-4">

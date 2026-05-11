@@ -4,9 +4,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver.edge.options import Options as EdgeOptions
 try:
     import psycopg2
     from psycopg2.extras import execute_values
@@ -19,6 +17,11 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import os
+import gzip
+import io
+import xml.etree.ElementTree as ET
+from urllib.parse import urljoin
+import re
 
 # Configurar logging
 logging.basicConfig(
@@ -30,12 +33,12 @@ logger = logging.getLogger(__name__)
 
 class EmpresasLaRepublicaScraper:
     """
-    Scraper para empresas.larepublica.co
-    Busca empresas por nicho y extrae información: nombre, RUES, ciudad, tamaño
+    Scraper para empresas.larepublica.co usando estrategia de sitemaps
+    Descarga sitemaps, busca por palabras clave y extrae información de las páginas
     """
     
     BASE_URL = "https://empresas.larepublica.co"
-    SEARCH_URL = f"{BASE_URL}/buscar"
+    SITEMAP_INDEX = f"{BASE_URL}/sitemapindex"
     
     def __init__(
         self,
@@ -44,10 +47,11 @@ class EmpresasLaRepublicaScraper:
         db_name: str = "appdb",
         db_user: str = "postgres",
         db_password: str = "postgres",
-        headless: bool = True
+        headless: bool = True,
+        max_sitemaps: int = 5
     ):
         """
-        Inicializa el scraper con parámetros de conexión a base de datos
+        Inicializa el scraper con estrategia de sitemaps
         
         Args:
             db_host: Host de PostgreSQL
@@ -56,6 +60,7 @@ class EmpresasLaRepublicaScraper:
             db_user: Usuario de PostgreSQL
             db_password: Contraseña de PostgreSQL
             headless: Si True, Selenium corre sin interfaz gráfica
+            max_sitemaps: Máximo número de sitemaps a descargar (desde el más reciente)
         """
         self.db_host = db_host
         self.db_port = db_port
@@ -66,207 +71,253 @@ class EmpresasLaRepublicaScraper:
         self.driver = None
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
+        self.max_sitemaps = max_sitemaps
     
     def _init_driver(self):
-        """Inicializa el driver de Selenium (Firefox primero para Docker, luego Chrome/Edge)"""
-        # Intentar Firefox primero (disponible en Docker)
+        """Inicializa el driver de Selenium (Firefox para Docker)"""
         try:
             firefox_options = FirefoxOptions()
             if self.headless:
                 firefox_options.add_argument("--headless")
             firefox_options.add_argument("--no-sandbox")
+            firefox_options.add_argument("--disable-dev-shm-usage")
             firefox_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             
             self.driver = webdriver.Firefox(options=firefox_options)
             logger.info("Driver de Firefox inicializado")
             return
         except Exception as e:
-            logger.debug(f"Firefox no disponible: {e}")
-        
-        # Intentar Chrome (local)
-        try:
-            chrome_options = ChromeOptions()
-            if self.headless:
-                chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            
-            self.driver = webdriver.Chrome(options=chrome_options)
-            logger.info("Driver de Chrome inicializado")
-            return
-        except Exception as e:
-            logger.debug(f"Chrome no disponible: {e}")
-        
-        # Intentar Edge (local)
-        try:
-            edge_options = EdgeOptions()
-            if self.headless:
-                edge_options.add_argument("--headless")
-            edge_options.add_argument("--no-sandbox")
-            edge_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            
-            self.driver = webdriver.Edge(options=edge_options)
-            logger.info("Driver de Edge inicializado")
-            return
-        except Exception as e:
-            logger.error(f"No se pudo inicializar ningún navegador: {e}")
-            raise Exception("No hay navegador disponible (Firefox, Chrome o Edge)")
-    
+            logger.error(f"No se pudo inicializar Firefox: {e}")
+            raise Exception("No se pudo inicializar navegador para scraping")
     
     def _close_driver(self):
         """Cierra el driver de Selenium"""
         if self.driver:
-            self.driver.quit()
-            logger.info("Driver cerrado")
+            try:
+                self.driver.quit()
+                logger.info("Driver cerrado")
+            except:
+                pass
     
-    def search_niche(self, niche: str, pages: int = 1) -> List[Dict[str, Any]]:
+    def _download_sitemapindex(self) -> Optional[List[str]]:
         """
-        Busca empresas por nicho y extrae los links de resultados
+        Descarga el índice de sitemaps de empresas.larepublica.co
         
-        Args:
-            niche: Término de búsqueda (ej: "veterinarias", "restaurantes")
-            pages: Número de páginas a scrapear
-            
         Returns:
-            Lista de diccionarios con información de empresas
+            Lista de URLs de sitemaps o None si falla
         """
-        if not self.driver:
-            self._init_driver()
-        
-        all_companies = []
-        
         try:
-            for page in range(1, pages + 1):
-                logger.info(f"Scrapeando página {page} para nicho: {niche}")
-                
-                # Construir URL con búsqueda
-                url = f"{self.BASE_URL}?q={niche}&page={page}"
-                
-                # Cargar página
-                self.driver.get(url)
-                
-                # Esperar a que carguen los resultados
-                try:
-                    WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_all_elements_located((By.CLASS_NAME, "result-item"))
-                    )
-                except:
-                    logger.warning(f"No se encontraron resultados en página {page}")
-                    break
-                
-                # Dar tiempo adicional para scroll y carga
-                time.sleep(2)
-                
-                # Parsear HTML
-                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                
-                # Extraer links de empresas con clase "result-item"
-                result_items = soup.find_all('a', class_='result-item')
-                logger.info(f"Encontradas {len(result_items)} empresas en página {page}")
-                
-                for item in result_items:
-                    try:
-                        company_data = self._parse_company_item(item)
-                        if company_data:
-                            all_companies.append(company_data)
-                    except Exception as e:
-                        logger.error(f"Error parseando empresa: {e}")
-                        continue
-                
-                # Respetar el servidor
-                time.sleep(1)
+            logger.info(f"🔽 Descargando índice de sitemaps desde {self.SITEMAP_INDEX}")
+            response = self.session.get(self.SITEMAP_INDEX, timeout=30)
+            logger.info(f"✅ Respuesta HTTP {response.status_code} recibida")
+            response.raise_for_status()
+            
+            logger.debug(f"Parseando XML (size: {len(response.content)} bytes)")
+            root = ET.fromstring(response.content)
+            
+            # Namespace de sitemap
+            ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+            
+            # Extraer todas las URLs de sitemaps
+            sitemap_urls = []
+            for sitemap in root.findall('sm:sitemap', ns):
+                loc = sitemap.find('sm:loc', ns)
+                if loc is not None and loc.text:
+                    sitemap_urls.append(loc.text)
+            
+            logger.info(f"📋 Encontrados {len(sitemap_urls)} sitemaps en el índice")
+            
+            # Los sitemaps más recientes generalmente están al final
+            # Invertimos para empezar con los más recientes
+            sitemap_urls.reverse()
+            
+            selected_sitemaps = sitemap_urls[:self.max_sitemaps]
+            logger.info(f"📌 Seleccionados primeros {len(selected_sitemaps)} sitemaps (desde los más recientes)")
+            for sitemap_url in selected_sitemaps[:3]:
+                logger.debug(f"  - {sitemap_url}")
+            
+            return selected_sitemaps
         
         except Exception as e:
-            logger.error(f"Error en búsqueda: {e}")
-        finally:
-            self._close_driver()
-        
-        logger.info(f"Total de empresas extraídas: {len(all_companies)}")
-        return all_companies
+            logger.error(f"❌ Error descargando sitemapindex: {e}", exc_info=True)
+            return None
     
-    def _parse_company_item(self, item) -> Optional[Dict[str, Any]]:
+    def _download_and_decompress_sitemap(self, sitemap_url: str) -> Optional[List[str]]:
         """
-        Parsea un elemento de resultado de empresa
+        Descarga un sitemap .txt.gz y lo descomprime
         
         Args:
-            item: Elemento BeautifulSoup del resultado
+            sitemap_url: URL del sitemap (ej: https://empresas.larepublica.co/sitemaps/companies_12.txt.gz)
             
         Returns:
-            Dict con datos de la empresa o None si hay error
+            Lista de URLs de empresas o None si falla
         """
         try:
-            # Extraer nombre
-            name_tag = item.find('h3', class_='company-name')
-            name = name_tag.get_text(strip=True) if name_tag else "N/A"
+            logger.info(f"📥 Descargando sitemap: {sitemap_url}")
             
-            # Extraer href para obtener el link
-            href = item.get('href', '')
-            full_url = f"{self.BASE_URL}{href}" if href.startswith('/') else href
+            response = self.session.get(sitemap_url, timeout=60)
+            logger.info(f"✅ Respuesta HTTP {response.status_code} recibida (size: {len(response.content)} bytes)")
+            response.raise_for_status()
             
-            # Extraer NIT del href (última parte del URL)
-            # Formato típico: /colombia/bolivar/cartagena/nombre-empresa-nit
-            nit = self._extract_nit_from_url(href)
+            # Descomprimir
+            logger.info(f"🗜️  Descomprimiendo archivo .gz")
+            with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as f:
+                content = f.read().decode('utf-8')
+            logger.info(f"✅ Descompresión completada")
             
-            # Extraer información adicional (puede estar en span o divs dentro del item)
-            # La estructura puede variar, así que intentamos extraer múltiples campos
+            # Parsear URLs (una por línea)
+            urls = [line.strip() for line in content.split('\n') if line.strip()]
+            logger.info(f"✅ Parseo completado: {len(urls)} URLs de empresas extraídas")
             
-            # Información de RUES (número de identificación)
-            rues_text = ""
-            for span in item.find_all('span'):
-                text = span.get_text(strip=True)
-                if any(char.isdigit() for char in text) and len(text) > 5:
-                    # Probable número de RUES/RUT
-                    rues_text = text
+            return urls
+        
+        except Exception as e:
+            logger.error(f"❌ Error descargando/descomprimiendo sitemap: {e}", exc_info=True)
+            return None
+    
+    def _search_keywords_in_urls(self, urls: List[str], keywords: List[str]) -> List[str]:
+        """
+        Busca URLs que coincidan con las palabras clave
+        
+        Args:
+            urls: Lista de URLs del sitemap
+            keywords: Palabras clave a buscar
+            
+        Returns:
+            Lista de URLs que contienen al menos una palabra clave
+        """
+        matching_urls = []
+        keywords_lower = [k.lower().replace(" ", "-") for k in keywords]
+        
+        for url in urls:
+            url_lower = url.lower()
+            for keyword in keywords_lower:
+                if keyword in url_lower:
+                    matching_urls.append(url)
+                    logger.debug(f"Coincidencia encontrada: {keyword} en {url}")
                     break
+        
+        logger.info(f"Encontradas {len(matching_urls)} URLs coincidentes")
+        return matching_urls
+    
+    def _scrape_company_page(self, url: str, niche: str) -> Optional[Dict[str, Any]]:
+        """
+        Scrappea una página individual de empresa y extrae la información
+        
+        Args:
+            url: URL de la empresa
+            niche: Nicho buscado
             
-            # Extraer ciudad/región del href o de otros campos
-            # El href generalmente tiene formato: /colombia/bolivar/cartagena/...
-            city = self._extract_city_from_url(href)
+        Returns:
+            Dict con datos de la empresa o None si falla
+        """
+        try:
+            if not self.driver:
+                self._init_driver()
             
-            # Extraer información de activa/inactiva y tamaño
-            # Esto usualmente está en el texto del item o en atributos
-            status_text = item.get_text(strip=True)
-            is_active = "inactiva" not in status_text.lower()
+            logger.debug(f"Scrapeando página: {url}")
             
-            company_data = {
-                "name": name,
-                "url": full_url,
-                "nit": nit,
-                "rues": rues_text,
-                "city": city,
-                "is_active": is_active,
-                "status": "Activa" if is_active else "Inactiva",
-                "company_size": self._estimate_company_size(status_text),
-                "search_niche": "",  # Se asigna en search_niche()
-                "scraped_at": datetime.now().isoformat(),
-                "raw_html": str(item)
-            }
+            # Cargar página
+            self.driver.get(url)
+            
+            # Esperar a que cargue contenido principal
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+            except:
+                logger.warning(f"Timeout esperando página: {url}")
+                return None
+            
+            time.sleep(1)  # Esperar carga de JavaScript
+            
+            # Parsear con BeautifulSoup
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            
+            # Extraer información de la página
+            company_data = self._parse_company_page(soup, url, niche)
             
             return company_data
         
         except Exception as e:
-            logger.error(f"Error en _parse_company_item: {e}")
+            logger.error(f"Error scrapeando página {url}: {e}")
+            return None
+    
+    def _parse_company_page(self, soup: BeautifulSoup, url: str, niche: str) -> Optional[Dict[str, Any]]:
+        """
+        Parsea el HTML de una página de empresa y extrae información
+        
+        Args:
+            soup: Objeto BeautifulSoup con el HTML
+            url: URL de la empresa
+            niche: Nicho buscado
+            
+        Returns:
+            Dict con datos extraídos o None si falla
+        """
+        try:
+            # Extraer nombre (generalmente en h1 o meta)
+            name = "N/A"
+            h1_tag = soup.find('h1')
+            if h1_tag:
+                name = h1_tag.get_text(strip=True)
+            else:
+                title_tag = soup.find('title')
+                if title_tag:
+                    name = title_tag.get_text(strip=True).split('|')[0].strip()
+            
+            # Extraer NIT del URL
+            nit = self._extract_nit_from_url(url)
+            
+            # Extraer ciudad del URL
+            city = self._extract_city_from_url(url)
+            
+            # Estado (activa/inactiva)
+            page_text = soup.get_text().lower()
+            is_active = "inactiva" not in page_text and "no verificada" not in page_text
+            
+            # Estimar tamaño de empresa
+            company_size = self._estimate_company_size(page_text)
+            
+            company_data = {
+                "name": name,
+                "url": url,
+                "nit": nit,
+                "city": city,
+                "is_active": is_active,
+                "status": "Activa" if is_active else "Inactiva",
+                "company_size": company_size,
+                "search_niche": niche,
+                "scraped_at": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Empresa extraída: {name} ({nit})")
+            return company_data
+        
+        except Exception as e:
+            logger.error(f"Error parseando página: {e}")
             return None
     
     def _extract_nit_from_url(self, url: str) -> str:
         """
         Extrae el NIT del URL
-        Formato típico: /colombia/bolivar/cartagena/nombre-empresa-nit
-        El NIT es la última parte después del último guion
+        Formato: https://empresas.larepublica.co/colombia/quindio/armenia/constructora-inmobiliaria-buenavista-s-a-s-901469729
+        El NIT es la última parte numérica al final de la URL
         """
         try:
-            # Obtener la última parte del URL
+            # Obtener la última parte después del último /
             last_part = url.split('/')[-1]
-            # El NIT está al final después del último guion
-            if '-' in last_part:
-                nit = last_part.split('-')[-1]
-                # Verificar que sea un número válido
-                if nit.isdigit() and len(nit) >= 8:
+            
+            # Buscar números al final (el NIT)
+            match = re.search(r'(\d{8,15})$', last_part)
+            if match:
+                nit = match.group(1)
+                # Formato típico: XXXXXXXX o XXXXXXXXX (8-9 dígitos)
+                if len(nit) >= 8:
                     return nit
+            
             return "N/A"
         except:
             return "N/A"
@@ -274,13 +325,17 @@ class EmpresasLaRepublicaScraper:
     def _extract_city_from_url(self, url: str) -> str:
         """
         Extrae la ciudad del URL
-        Formato típico: /colombia/bolivar/cartagena/nombre-empresa-nit
+        Formato: /colombia/departamento/ciudad/nombre-nit
         """
         try:
+            # Extraer partes del path
             parts = url.split('/')
-            # Formato esperado: ['', 'colombia', 'departamento', 'ciudad', 'nombre-nit']
-            if len(parts) >= 4:
-                return parts[3]  # Índice 3 es la ciudad
+            # Formato: https://empresas... /colombia /quindio /armenia /nombre-nit
+            # Índices:                    0         1        2        3         4
+            if len(parts) >= 5:
+                # Índice 3 es generalmente la ciudad
+                city = parts[3]
+                return city if city else "N/A"
             return "N/A"
         except:
             return "N/A"
@@ -292,16 +347,98 @@ class EmpresasLaRepublicaScraper:
         """
         text_lower = text.lower()
         
-        if "grande" in text_lower or "corporación" in text_lower:
+        if "grande" in text_lower or "corporación" in text_lower or "empresa grande" in text_lower:
             return "Grande"
         elif "mediana" in text_lower or "empresa mediana" in text_lower:
             return "Mediana"
-        elif "pequeña" in text_lower or "pyme" in text_lower:
+        elif "pequeña" in text_lower or "pyme" in text_lower or "empresa pequeña" in text_lower:
             return "Pequeña"
-        elif "micro" in text_lower or "autónomo" in text_lower:
+        elif "micro" in text_lower or "autónomo" in text_lower or "independiente" in text_lower:
             return "Micro"
         else:
             return "No especificado"
+    
+    def search_niche(self, niche: str, keywords: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Busca empresas por nicho usando sitemaps
+        
+        Args:
+            niche: Nicho de búsqueda (ej: "restaurantes", "veterinarias")
+            keywords: Palabras clave específicas (si no se proporcionan, se usa el nicho como palabra clave)
+            
+        Returns:
+            Lista de diccionarios con información de empresas
+        """
+        if keywords is None:
+            keywords = [niche]
+        else:
+            keywords = list(set(keywords + [niche]))  # Incluir el nicho como palabra clave
+        
+        all_companies = []
+        
+        try:
+            logger.info(f"🔍 Iniciando búsqueda de nicho: {niche}")
+            logger.info(f"🔑 Palabras clave: {keywords}")
+            
+            # 1. Descargar índice de sitemaps
+            logger.info(f"📋 Paso 1/4: Obteniendo índice de sitemaps...")
+            sitemap_urls = self._download_sitemapindex()
+            if not sitemap_urls:
+                logger.warning("⚠️ No se pudieron obtener sitemaps")
+                return []
+            
+            logger.info(f"✅ Obtenidos {len(sitemap_urls)} sitemaps")
+            
+            # 2. Procesar cada sitemap
+            logger.info(f"📥 Paso 2/4: Descargando {len(sitemap_urls)} sitemaps...")
+            for idx, sitemap_url in enumerate(sitemap_urls, 1):
+                logger.info(f"  [{idx}/{len(sitemap_urls)}] Procesando: {sitemap_url}")
+                
+                # Descargar y descomprimir
+                company_urls = self._download_and_decompress_sitemap(sitemap_url)
+                if not company_urls:
+                    logger.warning(f"  ⚠️ No se pudo descargar este sitemap")
+                    continue
+                
+                logger.info(f"  ✅ Obtenidas {len(company_urls)} URLs del sitemap")
+                
+                # 3. Buscar coincidencias con palabras clave
+                logger.info(f"🔎 Paso 3/4: Filtrando por palabras clave...")
+                matching_urls = self._search_keywords_in_urls(company_urls, keywords)
+                logger.info(f"  ✅ Encontradas {len(matching_urls)} coincidencias")
+                
+                if not matching_urls:
+                    logger.info(f"  ℹ️ No hay coincidencias en este sitemap")
+                    continue
+                
+                # 4. Scrappear cada página
+                logger.info(f"🌐 Paso 4/4: Scrapeando {len(matching_urls)} páginas...")
+                for page_idx, company_url in enumerate(matching_urls, 1):
+                    try:
+                        if page_idx % 10 == 0:
+                            logger.info(f"  [{page_idx}/{len(matching_urls)}] Scrapeado...")
+                        
+                        company_data = self._scrape_company_page(company_url, niche)
+                        if company_data:
+                            all_companies.append(company_data)
+                            
+                            # Dar tiempo al servidor
+                            time.sleep(0.5)
+                    
+                    except Exception as e:
+                        logger.debug(f"  Error scrapeando {company_url}: {e}")
+                        continue
+                
+                logger.info(f"  ✅ Completado sitemap {idx}: {len(all_companies)} empresas acumuladas")
+        
+        except Exception as e:
+            logger.error(f"❌ Error en búsqueda de nicho: {e}", exc_info=True)
+        
+        finally:
+            self._close_driver()
+        
+        logger.info(f"✅ Búsqueda completada: {len(all_companies)} empresas encontradas para '{niche}'")
+        return all_companies
     
     def get_db_connection(self):
         """Obtiene conexión a la base de datos.
@@ -342,13 +479,13 @@ class EmpresasLaRepublicaScraper:
         try:
             cur = conn.cursor()
             
-            # Tabla de empresas scrapeadas
+            # Tabla de empresas
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS companies (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(500) NOT NULL,
                     url VARCHAR(1000),
-                    rues VARCHAR(100),
+                    nit VARCHAR(50),
                     city VARCHAR(200),
                     is_active BOOLEAN DEFAULT true,
                     status VARCHAR(50),
@@ -387,16 +524,7 @@ class EmpresasLaRepublicaScraper:
             conn.close()
     
     def save_companies(self, companies: List[Dict[str, Any]], niche: str) -> bool:
-        """
-        Guarda las empresas en la base de datos
-        
-        Args:
-            companies: Lista de diccionarios con datos de empresas
-            niche: Nicho buscado
-            
-        Returns:
-            True si fue exitoso, False en caso contrario
-        """
+        """Guarda empresas en la base de datos"""
         if not companies:
             logger.warning("No hay empresas para guardar")
             return False
@@ -405,17 +533,15 @@ class EmpresasLaRepublicaScraper:
         if not conn:
             return False
 
-        # Si psycopg2 está disponible y execute_values también, usar inserción masiva en Postgres
         if psycopg2 is not None and execute_values is not None:
             try:
                 cur = conn.cursor()
                 values = []
                 for company in companies:
-                    company["search_niche"] = niche
                     values.append((
                         company.get("name"),
                         company.get("url"),
-                        company.get("rues"),
+                        company.get("nit"),
                         company.get("city"),
                         company.get("is_active"),
                         company.get("status"),
@@ -426,15 +552,9 @@ class EmpresasLaRepublicaScraper:
 
                 query = """
                     INSERT INTO companies 
-                    (name, url, rues, city, is_active, status, company_size, search_niche, scraped_at)
+                    (name, url, nit, city, is_active, status, company_size, search_niche, scraped_at)
                     VALUES %s
-                    ON CONFLICT (url) 
-                    DO UPDATE SET 
-                        name = EXCLUDED.name,
-                        is_active = EXCLUDED.is_active,
-                        status = EXCLUDED.status,
-                        company_size = EXCLUDED.company_size,
-                        updated_at = CURRENT_TIMESTAMP
+                    ON CONFLICT (url) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
                     RETURNING id;
                 """
 
@@ -442,32 +562,27 @@ class EmpresasLaRepublicaScraper:
                 conn.commit()
                 affected_rows = cur.rowcount
                 cur.close()
-                logger.info(f"Guardadas/actualizadas {affected_rows} empresas (Postgres)")
+                logger.info(f"Guardadas {affected_rows} empresas (Postgres)")
                 return True
             except Exception as e:
-                logger.error(f"Error guardando empresas en Postgres: {e}")
-                try:
-                    conn.close()
-                except:
-                    pass
+                logger.error(f"Error guardando en Postgres: {e}")
                 return False
 
-        # Fallback: SQLite (insertar una por una)
+        # SQLite fallback
         try:
             cur = conn.cursor()
             for company in companies:
-                company["search_niche"] = niche
                 try:
                     cur.execute(
                         """
                         INSERT OR IGNORE INTO companies
-                        (name, url, rues, city, is_active, status, company_size, search_niche, scraped_at)
+                        (name, url, nit, city, is_active, status, company_size, search_niche, scraped_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             company.get("name"),
                             company.get("url"),
-                            company.get("rues"),
+                            company.get("nit"),
                             company.get("city"),
                             int(bool(company.get("is_active"))),
                             company.get("status"),
@@ -476,100 +591,32 @@ class EmpresasLaRepublicaScraper:
                             company.get("scraped_at"),
                         ),
                     )
-                    # Si ya existía, intentar actualizar
-                    cur.execute(
-                        """
-                        UPDATE companies
-                        SET name = ?, is_active = ?, status = ?, company_size = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE url = ?
-                        """,
-                        (
-                            company.get("name"),
-                            int(bool(company.get("is_active"))),
-                            company.get("status"),
-                            company.get("company_size"),
-                            company.get("url"),
-                        ),
-                    )
                 except Exception as e:
-                    logger.warning(f"Error insertando/actualizando empresa {company.get('name')}: {e}")
-                    continue
+                    logger.warning(f"Error insertando {company.get('name')}: {e}")
 
             conn.commit()
             cur.close()
-            logger.info(f"Guardadas/actualizadas {len(companies)} empresas (SQLite)")
-            try:
-                conn.close()
-            except:
-                pass
+            logger.info(f"Guardadas {len(companies)} empresas (SQLite)")
             return True
 
         except Exception as e:
-            logger.error(f"Error guardando empresas en SQLite: {e}")
+            logger.error(f"Error guardando en SQLite: {e}")
+            return False
+        
+        finally:
             try:
                 conn.close()
             except:
                 pass
-            return False
     
-    def get_companies_by_niche(self, niche: str) -> List[Dict[str, Any]]:
-        """
-        Obtiene empresas guardadas por nicho
-        
-        Args:
-            niche: Nicho a buscar
-            
-        Returns:
-            Lista de diccionarios con datos de empresas
-        """
-        conn = self.get_db_connection()
-        if not conn:
-            return []
-        
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT id, name, url, rues, city, is_active, status, company_size, scraped_at
-                FROM companies
-                WHERE search_niche = %s
-                ORDER BY scraped_at DESC
-                LIMIT 1000;
-            """, (niche,))
-            
-            columns = [desc[0] for desc in cur.description]
-            results = [dict(zip(columns, row)) for row in cur.fetchall()]
-            cur.close()
-            
-            return results
-        
-        except Exception as e:
-            logger.error(f"Error obteniendo empresas: {e}")
-            return []
-        
-        finally:
-            conn.close()
-    
-    def scrape_and_save(self, niche: str, pages: int = 1) -> Dict[str, Any]:
-        """
-        Pipeline completo: scrape, parse y guarda en base de datos
-        
-        Args:
-            niche: Término de búsqueda
-            pages: Número de páginas a scrapear
-            
-        Returns:
-            Dict con resultado de la operación
-        """
+    def scrape_and_save(self, niche: str, keywords: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Pipeline completo: scrape, parse y guarda en base de datos"""
         logger.info(f"Iniciando scrape para nicho: {niche}")
         
-        # Crear tablas si no existen
         self.create_tables()
-        
-        # Buscar empresas
-        companies = self.search_niche(niche, pages)
+        companies = self.search_niche(niche, keywords)
         
         if not companies:
-            logger.warning(f"No se encontraron empresas para {niche}")
             return {
                 "success": False,
                 "niche": niche,
@@ -577,7 +624,6 @@ class EmpresasLaRepublicaScraper:
                 "message": "No se encontraron resultados"
             }
         
-        # Guardar en BD
         saved = self.save_companies(companies, niche)
         
         return {
@@ -588,31 +634,39 @@ class EmpresasLaRepublicaScraper:
             "message": f"Scrape completado: {len(companies)} empresas"
         }
 
+    def search_by_niche(self, niche: str, target_count: int = 100) -> Dict[str, Any]:
+        """
+        Búsqueda simplificada para background task
+        Wrapper de scrape_and_save con parámetros específicos
+        
+        Args:
+            niche: Nicho de búsqueda (ej: "veterinarias")
+            target_count: Número objetivo de empresas (sin usar, para compatibilidad)
+            
+        Returns:
+            Dict con resultado del scrape
+        """
+        return self.scrape_and_save(niche, keywords=[niche])
 
-# Uso directo del script
+
 if __name__ == "__main__":
-    import sys
-    
-    # Configurar desde variables de entorno o argumentos
+    # Uso directo
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = int(os.getenv("DB_PORT", "5432"))
     db_name = os.getenv("DB_NAME", "appdb")
     db_user = os.getenv("DB_USER", "postgres")
     db_password = os.getenv("DB_PASSWORD", "postgres")
     
-    # Crear scraper - intentará PostgreSQL si psycopg2 está disponible
     scraper = EmpresasLaRepublicaScraper(
         db_host=db_host,
         db_port=db_port,
         db_name=db_name,
         db_user=db_user,
         db_password=db_password,
-        headless=True
+        headless=True,
+        max_sitemaps=5
     )
     
-    # Ejemplo de uso
-    niche = sys.argv[1] if len(sys.argv) > 1 else "veterinarias"
-    pages = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    
-    result = scraper.scrape_and_save(niche, pages)
-    print(f"\n✅ Resultado: {result}")
+    # Ejemplo: buscar restaurantes
+    result = scraper.scrape_and_save("restaurantes", keywords=["restaurante", "café", "comida"])
+    print(f"Resultado: {result}")

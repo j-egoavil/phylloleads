@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { seedLeads, generateLead, NICHE_LABELS, type Lead, type LeadNiche, type LeadSource, type LeadStatus } from "@/lib/mockData";
+import { NICHE_LABELS, type Lead, type LeadNiche, type LeadSource, type LeadStatus } from "@/lib/mockData";
 
 interface Filters {
   search: string;
@@ -64,7 +64,7 @@ export const useLeadStore = create<LeadState>((set, get) => ({
   scrapeLogs: [],
   queueProgress: 0,
   nextRunAt: 0,
-  isRunning: true,
+  isRunning: false,
   hydrated: false,
   setFilter: (k, v) => set((s) => ({ filters: { ...s.filters, [k]: v } })),
   selectLead: (id) => set({ selectedLeadId: id }),
@@ -102,17 +102,7 @@ export const useLeadStore = create<LeadState>((set, get) => ({
     });
   },
   triggerScrape: () => {
-    const { sources, addLead, pushScrapeLog, scrapeLimit } = get();
-    const active = (Object.keys(sources) as LeadSource[]).filter((s) => sources[s]);
-    if (!active.length) return;
-    const src = active[Math.floor(Math.random() * active.length)];
-    const desired = 5 + Math.floor(Math.random() * 12);
-    const count = Math.min(desired, scrapeLimit);
-    for (let i = 0; i < count; i++) {
-      const lead = generateLead(Date.now() + i, 0);
-      lead.source = src;
-      addLead(lead);
-    }
-    pushScrapeLog({ id: `s_${Date.now()}`, source: src, at: new Date().toISOString(), extracted: count });
+    // Mock data generation disabled. Use API integration instead.
+    // See: useLeadScraper hook for real API data
   },
 }));

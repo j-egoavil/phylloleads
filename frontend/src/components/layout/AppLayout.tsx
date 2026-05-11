@@ -1,9 +1,41 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Settings, BarChart3, Radar, Bell, Play, Pause, Moon, Sun } from "lucide-react";
 import { useLeadStore } from "@/store/leadStore";
-import { useRealtimeSimulator } from "@/hooks/useRealtimeSimulator";
+import { useFetchLeads } from "@/hooks/useFetchLeads";
+import { ScraperModal } from "@/components/dashboard/ScraperModal";
 import { toast } from "sonner";
+
+// Temporary function to start scraper - will be called from dashboard component
+async function startScraperAsync(niches: string[], targetCount: number) {
+  // Use localhost for development, auto-detect in production
+  const API_URL = typeof window !== 'undefined' 
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : 'http://localhost:8000';
+  try {
+    const response = await fetch(`${API_URL}/api/scraper/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        niches,
+        target_count: targetCount,
+        min_category: 'C'
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data.success) throw new Error(data.detail || 'Error');
+    
+    return true;
+  } catch (err) {
+    toast.error(`Error: ${err instanceof Error ? err.message : 'Unknown'}`);
+    return false;
+  }
+}
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -15,13 +47,18 @@ export function AppLayout() {
   const hydrate = useLeadStore((s) => s.hydrate);
   const hydrated = useLeadStore((s) => s.hydrated);
   useEffect(() => { hydrate(); }, [hydrate]);
-  useRealtimeSimulator();
+  
+  // Fetch leads cuando isRunning
+  useFetchLeads();
+  
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const totalLeads = useLeadStore((s) => s.leads.length);
   const isRunning = useLeadStore((s) => s.isRunning);
   const setRunning = useLeadStore((s) => s.setRunning);
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [showScraperModal, setShowScraperModal] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   useEffect(() => {
     const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ??
       (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -33,10 +70,28 @@ export function AppLayout() {
   }, [theme]);
 
   const toggleRun = () => {
-    const next = !isRunning;
-    setRunning(next);
-    toast[next ? "success" : "info"](next ? "Automatización iniciada" : "Automatización detenida");
+    if (!isRunning) {
+      setShowScraperModal(true);
+    } else {
+      setRunning(false);
+      toast.info("Automatización detenida");
+    }
   };
+
+  const handleStartScraper = useCallback(async (niches: string[], targetCount: number) => {
+    setShowScraperModal(false);
+    setIsSearching(true);
+    setRunning(true);
+    toast.success("Búsqueda de leads iniciada");
+    
+    const success = await startScraperAsync(niches, targetCount);
+    if (success) {
+      setTimeout(() => setIsSearching(false), 1000);
+    } else {
+      setRunning(false);
+      setIsSearching(false);
+    }
+  }, [setRunning]);
 
   return (
     <div className="min-h-screen flex bg-background text-foreground">
@@ -89,9 +144,10 @@ export function AppLayout() {
             </span>
             <button
               onClick={toggleRun}
+              disabled={isSearching}
               className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium transition-colors ${
                 isRunning ? "bg-destructive/10 text-destructive hover:bg-destructive/20" : "bg-success/15 text-success hover:bg-success/25"
-              }`}
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {isRunning ? <><Pause className="h-4 w-4" /> Detener</> : <><Play className="h-4 w-4" /> Iniciar</>}
             </button>
@@ -111,6 +167,13 @@ export function AppLayout() {
           {hydrated ? <Outlet /> : null}
         </main>
       </div>
+
+      <ScraperModal
+        isOpen={showScraperModal}
+        onClose={() => setShowScraperModal(false)}
+        onSubmit={handleStartScraper}
+        isLoading={isSearching}
+      />
     </div>
   );
 }
