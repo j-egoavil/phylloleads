@@ -36,6 +36,93 @@ class PaginasAmarillasDirectScraper:
             'Referer': 'https://www.paginasamarillas.com.co/',
         }
         self.session.headers.update(self.headers)
+
+    def _build_html_soup(self, html: str) -> BeautifulSoup:
+        """Construye un parser con el HTML disponible."""
+        return BeautifulSoup(html or '', 'html.parser')
+
+    def _normalize_results(self, results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Elimina vacíos y asegura resultados consistentes."""
+        cleaned = {
+            'phone': results.get('phone'),
+            'website': results.get('website'),
+            'address': results.get('address'),
+        }
+
+        for key, value in list(cleaned.items()):
+            if isinstance(value, str):
+                value = value.strip()
+                if not value or value.lower() in ['n/a', 'no data', 'unknown']:
+                    cleaned[key] = None
+                else:
+                    cleaned[key] = value
+
+        return cleaned if any(cleaned.values()) else None
+
+    def _extract_contact_from_html(self, html: str) -> Dict[str, Optional[str]]:
+        """Extrae teléfono, website y dirección desde HTML genérico."""
+        soup = self._build_html_soup(html)
+        page_text = soup.get_text("\n", strip=True)
+
+        results = {'phone': None, 'website': None, 'address': None}
+
+        phone_links = soup.find_all('a', href=re.compile(r'^tel:', re.IGNORECASE))
+        if phone_links:
+            phone = phone_links[0].get('href', '').replace('tel:', '').strip()
+            if phone and re.search(r'\d{7,}', phone):
+                results['phone'] = phone
+
+        if not results['phone']:
+            phone_patterns = [
+                r'\+57\s*[1-9]\s*[\d\s\-\(\)]{7,}',
+                r'\+57\s*\d{10}',
+                r'(?:tel|telefono|phone)[\s:]*\+?57[\d\s\-\(\)]{10,}',
+                r'\(?\d{1,3}\)?\s*[\d\s\-\(\)]{7,12}',
+            ]
+            for pattern in phone_patterns:
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    phone = match.group(0).strip()
+                    digits = re.sub(r'\D', '', phone)
+                    if len(digits) >= 7:
+                        results['phone'] = phone
+                        break
+
+        website_candidates = []
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '').strip()
+            if href.startswith('http') and not any(x in href.lower() for x in ['google', 'maps', 'youtube', 'facebook', 'instagram']):
+                website_candidates.append(href)
+
+        if website_candidates:
+            results['website'] = website_candidates[0]
+
+        address_selectors = [
+            ('div', {'class': re.compile(r'address', re.IGNORECASE)}),
+            ('span', {'class': re.compile(r'address', re.IGNORECASE)}),
+            ('p', {'class': re.compile(r'address', re.IGNORECASE)}),
+            ('div', {'data-attrid': re.compile(r'address', re.IGNORECASE)}),
+        ]
+        for tag_name, attrs in address_selectors:
+            address_elem = soup.find(tag_name, attrs=attrs)
+            if address_elem:
+                address = address_elem.get_text(" ", strip=True)
+                if address:
+                    results['address'] = address
+                    break
+
+        if not results['address']:
+            for line in page_text.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                lower_line = line.lower()
+                if any(word in lower_line for word in ['calle', 'carrera', 'avenida', 'av.', 'cra.', 'cll.', 'diag', '#']):
+                    if 10 < len(line) < 160:
+                        results['address'] = line
+                        break
+
+        return results
     
     def connect_db(self) -> bool:
         try:
@@ -66,54 +153,36 @@ class PaginasAmarillasDirectScraper:
             response = self.session.get(search_url, params=params, timeout=15)
             response.raise_for_status()
             
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            results = {
-                'phone': None,
-                'website': None,
-                'address': None
-            }
-            
-            # Buscar el primer resultado
-            # Páginas Amarillas usa estructuras variables, intentar múltiples selectores
-            business_result = (
-                soup.find('div', class_='business-listing') or
-                soup.find('div', class_='result-item') or
-                soup.find('a', class_='business-card')
-            )
-            
-            if business_result:
-                # Extraer teléfono
-                phone_link = business_result.find('a', href=re.compile(r'tel:'))
-                if phone_link:
-                    phone = phone_link.get('href', '').replace('tel:', '').strip()
-                    if phone and re.search(r'\d{7,}', phone):
-                        results['phone'] = phone
-                        logger.info(f"        -> Teléfono: {phone}")
-                
-                # Extraer website
-                for link in business_result.find_all('a', href=True):
-                    href = link.get('href', '')
-                    if href.startswith('http') and 'paginasamarillas' not in href:
-                        results['website'] = href
-                        logger.info(f"        -> Website: {href}")
-                        break
-                
-                # Extraer dirección
-                address_elem = (
-                    business_result.find('div', class_='address') or
-                    business_result.find('span', class_='address')
-                )
-                if address_elem:
-                    address = address_elem.get_text(strip=True)
-                    if address and len(address) > 10:
-                        results['address'] = address
-                        logger.info(f"        -> Dirección: {address[:50]}")
-            
-            if any(results.values()):
-                return results
-            
-            return None
+            soup = self._build_html_soup(response.text)
+
+            # Páginas Amarillas cambia mucho el DOM: intentar varios contenedores y, si no, parseo global.
+            candidate_nodes = [
+                soup.find('div', class_='business-listing'),
+                soup.find('div', class_='result-item'),
+                soup.find('a', class_='business-card'),
+                soup.find('article'),
+                soup.find('li', class_='result'),
+            ]
+
+            html = None
+            for node in candidate_nodes:
+                if node:
+                    html = str(node)
+                    break
+
+            if not html:
+                html = response.text
+
+            results = self._extract_contact_from_html(html)
+
+            if results.get('phone'):
+                logger.info(f"        -> Teléfono: {results['phone']}")
+            if results.get('website'):
+                logger.info(f"        -> Website: {results['website']}")
+            if results.get('address'):
+                logger.info(f"        -> Dirección: {results['address'][:50]}")
+
+            return self._normalize_results(results)
         
         except Exception as e:
             logger.warning(f"   [Páginas Amarillas] Error: {str(e)[:80]}")
@@ -132,6 +201,7 @@ class PaginasAmarillasDirectScraper:
             }
             
             response = self.session.get(url, params=params, timeout=15)
+            response.raise_for_status()
             text = response.text
             
             results = {
@@ -160,16 +230,26 @@ class PaginasAmarillasDirectScraper:
                 if results['phone']:
                     break
             
-            # Extraer website
-            website_matches = re.findall(r'https?://(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})', text)
-            if website_matches:
-                for domain in website_matches:
-                    if domain and not any(x in domain for x in ['google', 'maps', 'youtube']):
-                        results['website'] = f"https://{domain}"
-                        logger.info(f"        -> Website: {results['website']}")
-                        break
+            soup = self._build_html_soup(text)
+            website_candidates = []
+            for link in soup.find_all('a', href=True):
+                href = link.get('href', '').strip()
+                if href.startswith('http') and not any(x in href.lower() for x in ['google', 'maps', 'youtube', 'facebook', 'instagram']):
+                    website_candidates.append(href)
+
+            if website_candidates:
+                results['website'] = website_candidates[0]
+                logger.info(f"        -> Website: {results['website']}")
+            else:
+                website_matches = re.findall(r'https?://(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})', text)
+                if website_matches:
+                    for domain in website_matches:
+                        if domain and not any(x in domain for x in ['google', 'maps', 'youtube']):
+                            results['website'] = f"https://{domain}"
+                            logger.info(f"        -> Website: {results['website']}")
+                            break
             
-            return results if any(results.values()) else None
+            return self._normalize_results(results)
         
         except Exception as e:
             logger.warning(f"   [Google] Error: {str(e)[:80]}")

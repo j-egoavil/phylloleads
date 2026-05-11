@@ -214,27 +214,14 @@ class EmpresasLaRepublicaScraper:
             Dict con datos de la empresa o None si falla
         """
         try:
-            if not self.driver:
-                self._init_driver()
-            
             logger.debug(f"Scrapeando página: {url}")
             
-            # Cargar página
-            self.driver.get(url)
-            
-            # Esperar a que cargue contenido principal
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
-            except:
-                logger.warning(f"Timeout esperando página: {url}")
-                return None
-            
-            time.sleep(1)  # Esperar carga de JavaScript
+            # Usar la sesión de requests para evitar inicializar navegadores pesados
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
             
             # Parsear con BeautifulSoup
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            soup = BeautifulSoup(response.text, 'html.parser')
             
             # Extraer información de la página
             company_data = self._parse_company_page(soup, url, niche)
@@ -268,8 +255,20 @@ class EmpresasLaRepublicaScraper:
                 if title_tag:
                     name = title_tag.get_text(strip=True).split('|')[0].strip()
             
+            # Limpiar el nombre (quitar NIT o "Registro Único" si está presente)
+            if '-' in name:
+                name = name.split('-')[0].strip()
+            if 'Registro' in name:
+                name = name.split('Registro')[0].strip()
+            
             # Extraer NIT del URL
             nit = self._extract_nit_from_url(url)
+            
+            # Si no se encontró en URL, buscar en el texto de la página
+            if nit == "N/A":
+                nit_match = re.search(r'NIT\s*[:\s]*(\d{8,15})', soup.get_text(), re.IGNORECASE)
+                if nit_match:
+                    nit = nit_match.group(1)
             
             # Extraer ciudad del URL
             city = self._extract_city_from_url(url)

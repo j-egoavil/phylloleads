@@ -15,10 +15,10 @@ services:
       dockerfile: Dockerfile.dev
     container_name: phylloleads_frontend
     ports:
-      - "5173:5173"
+      - "1200:5173"
     environment:
-      VITE_API_URL: http://localhost:8000
-      VITE_WS_URL: ws://localhost:8000
+      VITE_API_URL: http://localhost:12001
+      VITE_WS_URL: ws://localhost:12001
       NODE_ENV: development
     volumes:
       - ./frontend:/app
@@ -41,7 +41,7 @@ services:
       dockerfile: Dockerfile
     container_name: phylloleads_backend
     ports:
-      - "8000:8000"
+      - "12001:12001"
     environment:
       DB_HOST: database
       DB_PORT: 5432
@@ -60,9 +60,9 @@ services:
     volumes:
       - ./backend:/app
       - ./backend/test_results:/app/test_results
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 12001 --reload
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:12001/health').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
