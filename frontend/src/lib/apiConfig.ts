@@ -11,14 +11,9 @@ export function getApiUrl(): string {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
 
-  // En localhost o 127.0.0.1, conectar al puerto 12001 localmente
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return `${protocol}//${hostname}:12001`;
-  }
-
-  // En producción, usar string vacío para rutas relativas
-  // El nginx redirige /api/* al backend automáticamente
-  return '';
+  // Siempre conectar al puerto 12001 del backend
+  // Funciona tanto en localhost como en producción
+  return `${protocol}//${hostname}:12001`;
 }
 
 export function getWsUrl(): string {
@@ -30,11 +25,6 @@ export function getWsUrl(): string {
   const protocol = window.location.protocol;
   const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
 
-  // En localhost, conectar al puerto 12001
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return `${wsProtocol}//${hostname}:12001`;
-  }
-
-  // En producción, usar rutas relativas con el mismo host
-  return `${wsProtocol}//${hostname}`;
+  // Siempre conectar al puerto 12001 del backend
+  return `${wsProtocol}//${hostname}:12001`;
 }
