@@ -11,9 +11,14 @@ export function getApiUrl(): string {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
 
-  // Siempre conectar al puerto 12001 del backend
-  // Funciona tanto en localhost como en producción
-  return `${protocol}//${hostname}:12001`;
+  // En localhost, conectar directamente al puerto 12001
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+    return `${protocol}//${hostname}:12001`;
+  }
+
+  // En producción (app.orbit.best, etc), usar rutas relativas
+  // El nginx redirige /api al backend interno
+  return '';
 }
 
 export function getWsUrl(): string {
@@ -25,6 +30,12 @@ export function getWsUrl(): string {
   const protocol = window.location.protocol;
   const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
 
-  // Siempre conectar al puerto 12001 del backend
-  return `${wsProtocol}//${hostname}:12001`;
+  // En localhost, conectar directamente al puerto 12001
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+    return `${wsProtocol}//${hostname}:12001`;
+  }
+
+  // En producción, construir URL completa con protocolo
+  // El nginx redirige /api al backend interno
+  return `${wsProtocol}//${hostname}`;
 }
