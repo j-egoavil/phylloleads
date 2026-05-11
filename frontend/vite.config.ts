@@ -18,6 +18,12 @@ export default defineConfig({
       host: "0.0.0.0",
       strictPort: false,
       allowedHosts: ["app.orbit.best", "localhost", "127.0.0.1"],
+      proxy: {
+        "/api": {
+          target: "http://backend:12001",
+          changeOrigin: true,
+        },
+      },
     },
   },
 });
