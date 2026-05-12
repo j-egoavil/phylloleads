@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLeadStore } from '@/store/leadStore';
+import { getApiUrl } from '@/lib/apiConfig';
 
 export function useFetchLeads() {
   const isRunning = useLeadStore((s) => s.isRunning);
@@ -17,7 +18,7 @@ export function useFetchLeads() {
       return;
     }
 
-    const API_URL = `${window.location.protocol}//${window.location.hostname}:8000`;
+    const API_URL = getApiUrl();
 
     const fetchNextLead = async () => {
       try {
