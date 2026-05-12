@@ -62,11 +62,11 @@ services:
       - ./backend/test_results:/app/test_results
     command: uvicorn main:app --host 0.0.0.0 --port 12001 --reload
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:12001/health').read()"]
-      interval: 30s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:12001/health"]
+      interval: 10s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 80s
 
   # =========================================================================
   # DATABASE - PostgreSQL

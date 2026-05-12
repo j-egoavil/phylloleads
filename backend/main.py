@@ -45,15 +45,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Endpoint de salud
-@app.get("/health")
-async def health_check():
-    """Health check"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat()
-    }
-
 @app.get("/")
 async def root():
     """Endpoint raíz"""
@@ -139,7 +130,8 @@ async def search_companies(request: SearchRequest):
         scraper = get_scraper()
         logger.info(f"Iniciando búsqueda para nicho: {request.niche}, páginas: {request.pages}")
         
-        result = scraper.scrape_and_save(request.niche, request.pages)
+        # El scraper de sitemaps usa keywords. Usamos el nicho como palabra clave principal.
+        result = scraper.scrape_and_save(request.niche, keywords=[request.niche])
         
         return SearchResponse(
             success=result["success"],
@@ -206,7 +198,8 @@ async def search_companies_async(request: SearchRequest, background_tasks: Backg
         scraper = get_scraper()
         
         # Agregar tarea al background
-        background_tasks.add_task(scraper.scrape_and_save, request.niche, request.pages)
+        # Ajustamos la firma para pasar una lista de keywords
+        background_tasks.add_task(scraper.scrape_and_save, request.niche, [request.niche])
         
         return {
             "success": True,
@@ -410,6 +403,73 @@ async def get_company_details(company_id: int):
     
     except Exception as e:
         logger.error(f"Error obteniendo detalles: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.post("/api/companies/{company_id}/enrich", tags=["Companies"])
+async def enrich_company(company_id: int):
+    """
+    Enriquecer una empresa específica on-demand.
+    Llama al `AutomaticDataScraper` para obtener phone/website/address y guarda en BD.
+    """
+    try:
+        import sqlite3
+        from services.scraper_automatico import AutomaticDataScraper
+
+        conn = sqlite3.connect("appdb.sqlite")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, name, city, url, nit FROM companies WHERE id = ?", (company_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+        company = dict(row)
+        conn.close()
+
+        # Ejecutar scraper (síncrono) para esta empresa
+        scraper = AutomaticDataScraper(db_path="appdb.sqlite")
+        if not scraper.connect_db():
+            raise HTTPException(status_code=500, detail="No se pudo conectar a la base de datos desde el scraper")
+
+        details = scraper.scrape_company(company['id'], company['name'], company.get('city', ''), nit=company.get('nit'))
+        if not details:
+            raise HTTPException(status_code=502, detail="No se obtuvieron detalles de enriquecimiento")
+
+        saved = scraper.save_details(company['id'], details)
+        scraper.close_db()
+        scraper.close_browser()
+
+        if not saved:
+            raise HTTPException(status_code=500, detail="No se pudieron guardar los detalles")
+
+        # Leer detalles actualizados
+        conn = sqlite3.connect("appdb.sqlite")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT phone, website, address, nit, legal_status, city_info, department, verified, verification_reason, scraped_at FROM company_details WHERE company_id = ?", (company_id,))
+        drow = cursor.fetchone()
+        conn.close()
+
+        return {
+            "success": True,
+            "company_id": company_id,
+            "updated": bool(drow),
+            "details": dict(drow) if drow else None,
+            "informa_extra": {
+                "city_info": details.get("city_info") if details else None,
+                "department": details.get("department") if details else None,
+                "verified": details.get("verified") if details else None,
+                "verification_reason": details.get("verification_reason") if details else None,
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error enriqueciendo empresa {company_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # ==================== SCRAPER AUTOMÁTICO ====================
@@ -682,7 +742,8 @@ def run_scraper_for_niche(niche: str, target_count: int):
                         idx,
                         company_name,
                         city,
-                        company_url  # Pasar URL de La República
+                        company_url,  # Pasar URL de La República
+                        nit=company.get('nit')
                     )
                 
                 enriched = {

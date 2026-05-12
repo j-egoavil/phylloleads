@@ -1,6 +1,6 @@
 """
-Scraper Mejorado - Búsqueda con Selenium en múltiples fuentes colombianas
-Busca automáticamente en: Páginas Amarillas, DuckDuckGo, Google
+Scraper Mejorado - Búsqueda con múltiples fuentes colombianas
+Busca automáticamente en: Informa Colombia, DuckDuckGo y websites de la empresa
 """
 
 import sqlite3
@@ -59,14 +59,15 @@ class AutomaticDataScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
     
-    def get_browser(self):
-        """Obtiene el driver del navegador disponible con opciones anti-detección"""
+    def get_browser(self, headless: bool = True):
+        """Obtiene el driver del navegador disponible con opciones anti-detección."""
         try:
             # En Docker, Firefox está disponible
             # Primero intentar Firefox (funciona en Docker)
             try:
                 options = webdriver.FirefoxOptions()
-                options.add_argument('--headless')
+                if headless:
+                    options.add_argument('--headless')
                 options.add_argument('--no-sandbox')
                 # Anti-detection options for Firefox
                 options.set_preference("dom.webdriver.enabled", False)
@@ -82,7 +83,8 @@ class AutomaticDataScraper:
             # Intentar Edge (local)
             try:
                 options = webdriver.EdgeOptions()
-                options.add_argument('--headless')
+                if headless:
+                    options.add_argument('--headless')
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-blink-features=AutomationControlled')
                 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -95,7 +97,8 @@ class AutomaticDataScraper:
             # Intentar Chrome (local)
             try:
                 options = ChromeOptions()
-                options.add_argument('--headless')
+                if headless:
+                    options.add_argument('--headless')
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-blink-features=AutomationControlled')
                 options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -131,11 +134,36 @@ class AutomaticDataScraper:
             db_path = os.getenv("APP_DB_PATH", self.db_path)
             self.conn = sqlite3.connect(db_path)
             self.conn.row_factory = sqlite3.Row
+            self._ensure_company_details_schema()
             logger.info("Conectado a SQLite")
             return True
         except Exception as e:
             logger.error(f"Error conectando a BD: {e}")
             return False
+
+    def _ensure_company_details_schema(self):
+        """Añade columnas faltantes a company_details en SQLite."""
+        if not self.conn or not isinstance(self.conn, sqlite3.Connection):
+            return
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(company_details)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        required_columns = {
+            'nit': 'TEXT',
+            'legal_status': 'TEXT',
+            'city_info': 'TEXT',
+            'department': 'TEXT',
+            'verified': 'BOOLEAN DEFAULT 0',
+            'verification_reason': 'TEXT',
+        }
+
+        for column_name, column_definition in required_columns.items():
+            if column_name not in existing_columns:
+                cursor.execute(f"ALTER TABLE company_details ADD COLUMN {column_name} {column_definition}")
+
+        self.conn.commit()
     
     def close_db(self):
         if self.conn:
@@ -168,6 +196,7 @@ class AutomaticDataScraper:
             match = re.search(pattern, text_clean)
             if match:
                 phone = match.group(0).strip()
+                phone = re.sub(r'[\s\-\.\)]+$', '', phone).strip()
                 digits = re.sub(r'\D', '', phone)
                 # Validar: 7-15 dígitos, sin dígitos muy repetidos
                 if 7 <= len(digits) <= 15 and not re.match(r'^(\d)\1{4,}$', digits):
@@ -188,6 +217,40 @@ class AutomaticDataScraper:
                 url = match.group(0).strip()
                 if len(url) < 200 and not any(x in url.lower() for x in ['google', 'duckduckgo', 'facebook']):
                     return url
+        return None
+
+    def extract_address_from_text(self, text: str) -> Optional[str]:
+        """Extrae dirección del texto usando patrones colombianos mejorados"""
+        if not text or len(text) < 10:
+            return None
+        
+        # Patrones para direcciones colombianas (más específicos)
+        patterns = [
+            # Completas: Calle/Carrera # - # Este / Oeste, Barrio, Ciudad
+            r'(?:Calle|Cl|Carrera|Cr|Avenida|Av|Diagonal|Dg|Transversal|Tr)\s+[#\d]+\s*[-–]\s*[#\d]+(?:\s+[A-Z]\.)?(?:\s+[A-Za-záéíóúñ\s]*)?(?:\s+(?:Barrio|Localidad|Vereda)\s+[A-Za-záéíóúñ\s]+)?',
+            # Con número y complemento: Calle 10A #23-45 interior 5
+            r'(?:Calle|Cl|Carrera|Cr|Avenida|Av)\s+\d+[A-Z]?\s+#\s*\d+\s*[-–]\s*\d+(?:\s+\w+)?',
+            # Formato simple: Calle 10 Número 23-45
+            r'(?:Calle|Cl|Carrera|Cr|Avenida|Av)\s+\d+(?:\s+[A-Z])?(?:\s+Número|\s+N[oº])\s+\d+\s*[-–]\s*\d+',
+            # Con barrio: Carrera 7 #45, Barrio San Alejo
+            r'(?:Calle|Cl|Carrera|Cr|Avenida|Av)\s+[\d#]+[\s\-]*[\d]+(?:.*?(?:Barrio|Localidad|Vereda|Zona)\s+[A-Za-záéíóúñ\s]+)?',
+            # Solo con keywords fuertes: Dirección Actual + contenido
+            r'(?:Dirección|Domicilio)\s*[:=]?\s*([A-Z0-9ÁÉÍÓÚÑa-záéíóúñ#\-\.\s,]{15,200}?)(?:(?:Tel|Teléfono|Actividad|Forma Jurídica|NIT|Web|Email)\b|$)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                address = match.group(1) if '(' in pattern and match.lastindex else match.group(0)
+                address = address.strip().strip(':-')
+                
+                # Validar longitud y descartar ruido
+                if 8 < len(address) < 250:
+                    # Remover marcadores comunes
+                    address = re.sub(r'(?:Ver mapa|Cómo llegar|Ver en mapa|Obtenerlo ahora|>>|<<).*$', '', address, flags=re.IGNORECASE).strip()
+                    if len(address) > 8 and not address.lower().startswith('n/a'):
+                        return address
+        
         return None
 
     def _build_html_soup(self, html: str) -> BeautifulSoup:
@@ -217,7 +280,15 @@ class AutomaticDataScraper:
         soup = self._build_html_soup(html)
         page_text = soup.get_text("\n", strip=True)
 
-        results = {'phone': None, 'website': None, 'address': None}
+        results = {
+            'phone': None,
+            'website': None,
+            'address': None,
+            'nit': None,
+            'legal_status': None,
+            'city_info': None,
+            'department': None,
+        }
 
         phone_links = soup.find_all('a', href=re.compile(r'^tel:', re.IGNORECASE))
         if phone_links:
@@ -243,6 +314,7 @@ class AutomaticDataScraper:
             if website:
                 results['website'] = website
 
+        # Mejorado: Buscar dirección en atributos HTML primero
         address_selectors = [
             ('div', {'data-attrid': 'address'}),
             ('span', {'class': re.compile(r'address', re.IGNORECASE)}),
@@ -257,16 +329,27 @@ class AutomaticDataScraper:
                     results['address'] = address
                     break
 
+        # Si no encontró en atributos, usar nuevo método mejorado
         if not results['address']:
-            for line in page_text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                lower_line = line.lower()
-                if any(word in lower_line for word in ['calle', 'carrera', 'avenida', 'av.', 'cra.', 'cll.', 'diag', '#']):
-                    if 10 < len(line) < 160:
-                        results['address'] = line
-                        break
+            address = self.extract_address_from_text(page_text)
+            if address:
+                results['address'] = address
+
+        nit_match = re.search(r'\bNIT\b\s*[:\-]?\s*(\d{8,15})', page_text, re.IGNORECASE)
+        if nit_match:
+            results['nit'] = nit_match.group(1).strip()
+
+        legal_match = re.search(r'\bForma\s+Jur[ií]dica\b\s*[:\-]?\s*([A-Z0-9ÁÉÍÓÚÑa-záéíóúñ\s\.]{3,120})', page_text, re.IGNORECASE)
+        if legal_match:
+            results['legal_status'] = legal_match.group(1).strip()
+
+        city_match = re.search(r'\bCiudad\b\s*[:\-]?\s*([A-ZÁÉÍÓÚÑa-záéíóúñ\s]{3,80})', page_text, re.IGNORECASE)
+        if city_match:
+            results['city_info'] = city_match.group(1).strip()
+
+        dept_match = re.search(r'\bDepartamento\b\s*[:\-]?\s*([A-ZÁÉÍÓÚÑa-záéíóúñ\s]{3,80})', page_text, re.IGNORECASE)
+        if dept_match:
+            results['department'] = dept_match.group(1).strip()
 
         # Intentar extraer información de JSON-LD (structured data)
         try:
@@ -285,18 +368,6 @@ class AutomaticDataScraper:
                     # LocalBusiness o similar
                     itype = item.get('@type') or item.get('type')
                     if itype and ('Business' in str(itype) or 'LocalBusiness' in str(itype) or 'Organization' in str(itype)):
-                        # telephone
-                        tel = item.get('telephone') or item.get('contactPoint', {}).get('telephone') if isinstance(item.get('contactPoint'), dict) else item.get('telephone')
-                        if tel and not results['phone']:
-                            results['phone'] = tel
-                        # url
-                        url = item.get('url') or item.get('sameAs')
-                        if url and not results['website']:
-                            # sameAs puede ser lista
-                            if isinstance(url, list) and len(url) > 0:
-                                results['website'] = url[0]
-                            else:
-                                results['website'] = url
                         # address puede ser objeto con streetAddress
                         addr = item.get('address')
                         if isinstance(addr, dict) and not results['address']:
@@ -307,10 +378,10 @@ class AutomaticDataScraper:
                                     parts.append(v)
                             if parts:
                                 results['address'] = ', '.join(parts)
-                        # Si ya tenemos todo, salir rápido
-                        if results['phone'] and results['website'] and results['address']:
+                        # Si ya tenemos dirección, salir
+                        if results['address']:
                             break
-                if results['phone'] and results['website'] and results['address']:
+                if results['address']:
                     break
         except Exception:
             pass
@@ -463,21 +534,11 @@ class AutomaticDataScraper:
                             logger.debug(f"      Website extraído: {href}")
                             break
             
-            # Extraer dirección: buscar patrones de calles colombianas
-            address_patterns = [
-                r'(?:Calle|Carrera|Avenida|Av|Cl|Cr)\s+[#\d]+[\s\w\-]*',
-                r'Barrio\s+[A-Za-záéíóúñ\s]+',
-                r'Localidad\s+[A-Za-záéíóúñ\s]+',
-            ]
-            for pattern in address_patterns:
-                match = re.search(pattern, all_text, re.IGNORECASE)
-                if match:
-                    address = match.group(0).strip()
-                    # Filtrar direcciones genéricas
-                    if len(address) > 5 and address.lower() not in ['calle', 'carrera', 'avenida']:
-                        results['address'] = address
-                        logger.debug(f"      Dirección extraída: {address}")
-                        break
+            # Mejorado: Extraer dirección usando el nuevo método
+            address = self.extract_address_from_text(all_text)
+            if address:
+                results['address'] = address
+                logger.debug(f"      Dirección extraída: {address}")
             
             return results
             
@@ -567,11 +628,10 @@ class AutomaticDataScraper:
                         results['website'] = href
                         break
             
-            # Buscar dirección: buscar patrones con Calle/Carrera/Avenida
-            address_pattern = r'(?:Calle|Carrera|Avenida|Av|Cl|Cr)\s+[#\d]+[\s\w\-]*(?:Bogotá|Medellín|Cali|Barranquilla|Bucaramanga|Santa Marta|Cúcuta|Pereira|Armenia|Manizales|Valledupar|Villavicencio|Pasto|Ibagué|Cartagena|Tuluá|Montería|Sincelejo|Popayán)'
-            match = re.search(address_pattern, all_text, re.IGNORECASE)
-            if match:
-                results['address'] = match.group(0).strip()
+            # Mejorado: Usar nuevo método para extraer dirección
+            address = self.extract_address_from_text(all_text)
+            if address:
+                results['address'] = address
             
             return results
             
@@ -639,12 +699,13 @@ class AutomaticDataScraper:
         domain = website.lower().split('/')[2] if 'http' in website else website.lower()
         return any(provider in domain for provider in host_providers)
 
-    def scrape_company(self, company_id: int, company_name: str, city: str, larepublica_url: str = None) -> Optional[Dict[str, Any]]:
-        """Extrae datos de una empresa buscando en múltiples fuentes
-        
-        ESTRATEGIA OPTIMIZADA (Selenium + Google Search DOM):
-        1. Google Web con Selenium → buscar + renderizar + extraer del DOM
-        2. Website fallback → si existe website válido (no gestor)
+    def scrape_company(self, company_id: int, company_name: str, city: str, larepublica_url: str = None, nit: str = None) -> Optional[Dict[str, Any]]:
+        """Extrae datos de una empresa buscando en múltiples fuentes.
+
+        Flujo actual:
+        1. Informa Colombia como fuente principal.
+        2. DuckDuckGo como fallback si Informa no aporta teléfono.
+        3. Website de la empresa si existe un dominio válido.
         """
         
         print(f"\n[Scraping] {company_name} ({city})")
@@ -653,11 +714,17 @@ class AutomaticDataScraper:
             'phone': None,
             'website': None,
             'address': None,
+            'nit': None,
+            'legal_status': None,
+            'city_info': None,
+            'department': None,
             'activity': None,
             'legal_status': None,
             'nit': None,
             'employees': None,
             'sources': [],
+            'verified': False,
+            'verification_reason': None,
             'status': 'partial'
         }
         
@@ -672,28 +739,38 @@ class AutomaticDataScraper:
             logger.info(f"   Búsqueda iniciada: {company_name}")
             
             # 1. FUENTE PRINCIPAL: Informa Colombia (Directorio Oficial)
-            data = self.informa_scraper.scrape_company(company_name, city)
+            data = self.informa_scraper.scrape_company(company_name, city, nit)
             if data:
                 for key, value in data.items():
                     if key in results and value and not results[key]:
                         results[key] = value
                 results['sources'].append('informacolombia')
-                logger.info(f"   ✓ Datos extraídos de Informa Colombia")
+                results['verified'] = True
+                results['verification_reason'] = 'informa_colombia_profile'
+                strategy_used = self.informa_scraper.last_used_strategy or "unknown"
+                logger.info(f"   ✓ Datos extraídos de Informa Colombia [{strategy_used}]")
 
-            # 2. FALLBACK: DuckDuckGo si Informa no dio teléfono
-            if not results.get('phone'):
+            # 2. FALLBACK: DuckDuckGo si Informa no completó datos clave
+            if not results.get('phone') or not results.get('website') or not results.get('address'):
                 data_fallback = self.search_duckduckgo(company_name, city)
                 if data_fallback:
                     for key, value in data_fallback.items():
                         if key in results and value and not results[key]:
                             results[key] = value
                     results['sources'].append('duckduckgo')
+                    if not results.get('verified'):
+                        results['verification_reason'] = 'duckduckgo_fallback'
+
+            # Si Informa no devolvió ficha real, pero sí pudimos completar por website,
+            # marcar como no verificado para que el front no lo trate como dato oficial.
+            if results.get('website') and 'website' in results.get('sources', []) and not results.get('verified'):
+                results['verification_reason'] = 'website_fallback'
         
         except Exception as e:
             logger.error(f"Error scraping {company_name}: {e}")
         
-        # Si no encontramos teléfono pero sí website VÁLIDO (no gestor), intentar extraer desde el website
-        if not results.get('phone') and results.get('website'):
+        # Si faltan datos de contacto y hay website válido (no gestor), intentar extraer desde el website
+        if (not results.get('phone') or not results.get('address')) and results.get('website'):
             if not self._is_website_host_provider(results.get('website')):
                 try:
                     url = results.get('website')
@@ -711,12 +788,23 @@ class AutomaticDataScraper:
                             if not results.get('address') and site_info.get('address'):
                                 results['address'] = site_info.get('address')
                                 results['sources'].append('website')
+                            for field in ('nit', 'legal_status', 'city_info', 'department'):
+                                if not results.get(field) and site_info.get(field):
+                                    results[field] = site_info.get(field)
+                                    results['sources'].append('website')
+                        if not results.get('verified') and any([site_info.get('phone'), site_info.get('address')]):
+                            results['verification_reason'] = 'website_fallback'
                 except Exception as e:
                     logger.debug(f"No se pudo scrapear website válido: {e}")
 
         # Determinar estado
         if results['phone'] or results['website'] or results['address']:
             results['status'] = 'completed' if results['phone'] else 'partial'
+
+        # Si el teléfono vino de fuentes de fallback o la página de Informa fue genérica,
+        # exponerlo como no verificado para el front.
+        if results.get('verification_reason') in {'duckduckgo_fallback', 'website_fallback'}:
+            results['verified'] = False
 
         logger.info(f"   -> Estado: {results['status']} | Fuentes: {', '.join(results['sources'])}")
 
@@ -757,8 +845,23 @@ class AutomaticDataScraper:
                 cursor.execute(query.replace('%s', '?'), (limit,))
             
             results = cursor.fetchall()
-            logger.info(f"Encontradas {len(results)} empresas para procesar")
-            return results
+            
+            # Convertir sqlite3.Row a dict para compatibilidad
+            result_dicts = []
+            for row in results:
+                if isinstance(row, dict):
+                    result_dicts.append(row)
+                else:
+                    # sqlite3.Row
+                    result_dicts.append({
+                        'id': row[0],
+                        'name': row[1],
+                        'city': row[2],
+                        'nit': row[3]
+                    })
+            
+            logger.info(f"Encontradas {len(result_dicts)} empresas para procesar")
+            return result_dicts
         
         except Exception as e:
             logger.error(f"Error: {e}")
@@ -769,7 +872,7 @@ class AutomaticDataScraper:
         try:
             cursor = self.conn.cursor()
             
-            if not any([details.get('phone'), details.get('website'), details.get('address')]):
+            if not any([details.get('phone'), details.get('website'), details.get('address'), details.get('nit'), details.get('legal_status'), details.get('city_info'), details.get('department')]):
                 logger.warning("   No hay datos para guardar")
                 return False
             
@@ -778,32 +881,50 @@ class AutomaticDataScraper:
                 # PostgreSQL
                 cursor.execute("""
                     INSERT INTO company_details 
-                    (company_id, phone, website, address, scraped_at)
-                    VALUES (%s, %s, %s, %s, %s)
+                    (company_id, phone, website, address, nit, legal_status, city_info, department, verified, verification_reason, scraped_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (company_id) 
                     DO UPDATE SET 
                         phone = EXCLUDED.phone,
                         website = EXCLUDED.website,
                         address = EXCLUDED.address,
+                        nit = EXCLUDED.nit,
+                        legal_status = EXCLUDED.legal_status,
+                        city_info = EXCLUDED.city_info,
+                        department = EXCLUDED.department,
+                        verified = EXCLUDED.verified,
+                        verification_reason = EXCLUDED.verification_reason,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     company_id,
                     details.get('phone') or 'N/A',
                     details.get('website') or 'N/A',
                     details.get('address') or 'N/A',
+                    details.get('nit') or 'N/A',
+                    details.get('legal_status') or 'N/A',
+                    details.get('city_info') or 'N/A',
+                    details.get('department') or 'N/A',
+                    1 if details.get('verified') else 0,
+                    details.get('verification_reason'),
                     datetime.now().isoformat()
                 ))
             else:
                 # SQLite
                 cursor.execute("""
                     INSERT OR REPLACE INTO company_details 
-                    (company_id, phone, website, address, scraped_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    (company_id, phone, website, address, nit, legal_status, city_info, department, verified, verification_reason, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     company_id,
                     details.get('phone') or 'N/A',
                     details.get('website') or 'N/A',
                     details.get('address') or 'N/A',
+                    details.get('nit') or 'N/A',
+                    details.get('legal_status') or 'N/A',
+                    details.get('city_info') or 'N/A',
+                    details.get('department') or 'N/A',
+                    1 if details.get('verified') else 0,
+                    details.get('verification_reason'),
                     datetime.now().isoformat()
                 ))
             
@@ -853,7 +974,8 @@ class AutomaticDataScraper:
                     details = self.scrape_company(
                         company['id'],
                         company['name'],
-                        company['city']
+                        company['city'],
+                        nit=company.get('nit')
                     )
                     
                     if details and self.save_details(company['id'], details):
@@ -883,7 +1005,7 @@ class AutomaticDataScraper:
 def main():
     print("\n" + "="*80)
     print("SCRAPER AUTOMÁTICO MEJORADO")
-    print("Búsqueda multi-fuente: Google Maps + DuckDuckGo + Páginas Amarillas")
+    print("Búsqueda multi-fuente: Informa Colombia + DuckDuckGo + website fallback")
     print("="*80)
     
     # Configurar BD desde variables de entorno

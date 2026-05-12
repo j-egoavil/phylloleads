@@ -607,6 +607,36 @@ class EmpresasLaRepublicaScraper:
                 conn.close()
             except:
                 pass
+
+    def get_companies_by_niche(self, niche: str) -> List[Dict[str, Any]]:
+        """Obtiene empresas de la base de datos filtradas por nicho"""
+        conn = self.get_db_connection()
+        if not conn:
+            return []
+        
+        try:
+            cur = conn.cursor()
+            # Adaptar para SQLite o Postgres según la conexión activa
+            query = "SELECT * FROM companies WHERE search_niche = %s ORDER BY created_at DESC"
+            if 'sqlite3' in str(type(conn)):
+                query = query.replace('%s', '?')
+                cur.execute(query, (niche,))
+            else:
+                cur.execute(query, (niche,))
+            
+            # Obtener nombres de columnas para retornar diccionarios
+            columns = [desc[0] for desc in cur.description]
+            results = []
+            for row in cur.fetchall():
+                results.append(dict(zip(columns, row)))
+                
+            cur.close()
+            return results
+        except Exception as e:
+            logger.error(f"Error obteniendo empresas por nicho: {e}")
+            return []
+        finally:
+            conn.close()
     
     def scrape_and_save(self, niche: str, keywords: Optional[List[str]] = None) -> Dict[str, Any]:
         """Pipeline completo: scrape, parse y guarda en base de datos"""

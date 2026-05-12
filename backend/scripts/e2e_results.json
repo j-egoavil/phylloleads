@@ -1,0 +1,83 @@
+{
+  "total": 10,
+  "success": 3,
+  "partial": 0,
+  "failed": 7,
+  "strategies_used": {
+    "direct_url": 2,
+    "selenium_search": 1
+  },
+  "total_time": 85.92616295814514,
+  "companies": [
+    {
+      "name": "Veterinarias SAS",
+      "status": "failed",
+      "strategy": "unknown",
+      "time": 16.56842827796936,
+      "fields": 0
+    },
+    {
+      "name": "Distribuciones Veterinarias SA SoC",
+      "status": "success",
+      "strategy": "direct_url (sin búsqueda, sin Selenium)",
+      "time": 1.0618212223052979,
+      "fields": 8
+    },
+    {
+      "name": "Soluciones Veterinarias Zona Bananera SAS",
+      "status": "success",
+      "strategy": "direct_url (sin búsqueda, sin Selenium)",
+      "time": 0.9329113960266113,
+      "fields": 8
+    },
+    {
+      "name": "Farmacia Santa María",
+      "status": "failed",
+      "strategy": "direct_url (sin búsqueda, sin Selenium)",
+      "time": 12.123963356018066,
+      "fields": 0
+    },
+    {
+      "name": "Repuestos Auto Directo",
+      "status": "success",
+      "strategy": "selenium_search (búsqueda + perfil)",
+      "time": 13.550832033157349,
+      "fields": 8
+    },
+    {
+      "name": "Consultora Empresarial Colombia",
+      "status": "failed",
+      "strategy": "selenium_search (búsqueda + perfil)",
+      "time": 8.798162937164307,
+      "fields": 0
+    },
+    {
+      "name": "Tecnologías de la Información S.A.",
+      "status": "failed",
+      "strategy": "selenium_search (búsqueda + perfil)",
+      "time": 8.612254858016968,
+      "fields": 0
+    },
+    {
+      "name": "Servicios de Limpieza Integral",
+      "status": "failed",
+      "strategy": "selenium_search (búsqueda + perfil)",
+      "time": 8.140558958053589,
+      "fields": 0
+    },
+    {
+      "name": "Transportes Nacionales Ltda",
+      "status": "failed",
+      "strategy": "selenium_search (búsqueda + perfil)",
+      "time": 8.062167406082153,
+      "fields": 0
+    },
+    {
+      "name": "Alimentos Frescos del Cauca",
+      "status": "failed",
+      "strategy": "selenium_search (búsqueda + perfil)",
+      "time": 8.07506251335144,
+      "fields": 0
+    }
+  ]
+}

@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     firefox-esr \
     wget \
     postgresql-client \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Descargar geckodriver (controlador de Firefox)
@@ -26,7 +27,8 @@ COPY . .
 
 # Copiar script de inicialización
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN dos2unix /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
 
 # Exponer puerto
 EXPOSE 12001
